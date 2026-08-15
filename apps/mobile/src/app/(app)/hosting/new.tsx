@@ -209,8 +209,11 @@ export default function NewHostingScreen() {
       },
       handoff_snapshot: {
         prepared: false,
+        recorded_at: '',
         items: [],
-        pet_state: {},
+        item_quantities: '',
+        pet_state: '',
+        observation: '',
         photos: [],
       },
     }));
@@ -232,7 +235,10 @@ export default function NewHostingScreen() {
       active_event_id: eventData.id,
     });
 
-    router.replace({ pathname: '/hosting/[eventId]', params: { eventId: eventData.id } });
+    router.replace({
+      pathname: '/hosting/[eventId]/handoff',
+      params: { eventId: eventData.id },
+    });
   }
 
   if (loading) {
@@ -329,11 +335,11 @@ export default function NewHostingScreen() {
 
       <SectionCard
         title="O que acontece ao continuar?"
-        description="Criamos um rascunho, salvamos o snapshot do dossiê e abrimos a preparação da hospedagem. Lá entram itens enviados, registro de entrega, checklist e exigências de foto." />
+        description="Criamos um rascunho, congelamos o dossiê dos pets e abrimos o registro de entrega. Depois você monta o checklist e envia o evento ao cuidador." />
 
       <PrimaryButton
         disabled={pets.length === 0}
-        label="Criar rascunho da hospedagem"
+        label="Criar rascunho e preparar entrega"
         loading={submitting}
         onPress={() => void createHosting()}
       />
