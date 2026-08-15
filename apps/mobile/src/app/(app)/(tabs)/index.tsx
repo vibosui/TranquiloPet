@@ -5,104 +5,123 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { PrimaryButton } from '@/components/primary-button';
 import { ScreenShell } from '@/components/screen-shell';
 import { SectionCard } from '@/components/section-card';
-import { useAppData } from '@/core/state/app-data-context';
-import {
-  checkMonitorConnection,
-  trackUsageInBackground,
-} from '@/features/analytics/usage-tracker';
+import { useAuth } from '@/core/auth/auth-context';
+import { supabase } from '@/core/supabase/client';
 import { colors, radii, spacing } from '@/theme/tokens';
 
-type MonitorStatus = 'checking' | 'not_configured' | 'offline' | 'online';
+type Summary = {
+  pets: number;
+  contacts: number;
+  hostingEvents: number;
+  activeEvents: number;
+};
+
+const emptySummary: Summary = {
+  pets: 0,
+  contacts: 0,
+  hostingEvents: 0,
+  activeEvents: 0,
+};
 
 export default function HomeScreen() {
   const router = useRouter();
-  const {
-    currentUser,
-    getCaregiverProfileByUserId,
-    getTutorProfileByUserId,
-    listPetsByOwner,
-  } = useAppData();
-  const [monitorStatus, setMonitorStatus] = useState<MonitorStatus>('checking');
+  const { profile } = useAuth();
+  const [summary, setSummary] = useState(emptySummary);
 
   useEffect(() => {
-    trackUsageInBackground({ eventName: 'app_opened', screen: 'home' });
     let active = true;
-    void checkMonitorConnection().then((status) => {
-      if (active) setMonitorStatus(status);
-    });
+
+    async function loadSummary() {
+      const [petsResult, contactsResult, eventsResult, activeResult] = await Promise.all([
+        supabase.from('pets').select('id', { count: 'exact', head: true }),
+        supabase.from('connections').select('id', { count: 'exact', head: true }).eq('status', 'accepted'),
+        supabase.from('hosting_events').select('id', { count: 'exact', head: true }),
+        supabase
+          .from('hosting_events')
+          .select('id', { count: 'exact', head: true })
+          .in('status', ['accepted', 'in_progress']),
+      ]);
+
+      if (!active) return;
+      setSummary({
+        pets: petsResult.count ?? 0,
+        contacts: contactsResult.count ?? 0,
+        hostingEvents: eventsResult.count ?? 0,
+        activeEvents: activeResult.count ?? 0,
+      });
+    }
+
+    void loadSummary();
     return () => {
       active = false;
     };
   }, []);
 
-  if (!currentUser) return null;
-
-  const tutor = getTutorProfileByUserId(currentUser.id);
-  const caregiver = getCaregiverProfileByUserId(currentUser.id);
-  const pets = listPetsByOwner(currentUser.id);
-  const firstName = currentUser.fullName.split(' ')[0];
+  const firstName = profile?.full_name.trim().split(/\s+/)[0] || 'por aqui';
 
   return (
     <ScreenShell
-      eyebrow="AMBIENTE DE TESTE"
+      eyebrow="HOSPEDA PATAS"
       title={`Olá, ${firstName}`}
-      subtitle="Confira seus perfis e mantenha as informações dos pets atualizadas.">
-      <View style={styles.metrics}>
-        <MetricCard label="Pets" value={String(pets.length)} />
-        <MetricCard label="Perfis ativos" value={String(Number(Boolean(tutor)) + Number(Boolean(caregiver)))} />
+      subtitle="Cuidar bem começa por conhecer. Organize a hospedagem e acompanhe cada cuidado sem ficar no escuro.">
+      <View style={styles.hero}>
+        <Text style={styles.heroKicker}>CUIDADO QUE ACOLHE</Text>
+        <Text style={styles.heroTitle}>Transparência durante toda a hospedagem.</Text>
+        <Text style={styles.heroText}>
+          Rotina, checklist, fotos e conversa ficam ligados ao mesmo evento para tutor e cuidador saberem exatamente o que aconteceu.
+        </Text>
+        <PrimaryButton label="Adicionar contato" onPress={() => router.push('/contacts')} />
       </View>
 
-      <SectionCard title="Próximos passos" description="Escolha o que deseja revisar ou cadastrar.">
+      <View style={styles.metrics}>
+        <MetricCard label="Hospedagens" value={summary.hostingEvents} />
+        <MetricCard label="Em cuidado" value={summary.activeEvents} />
+        <MetricCard label="Contatos" value={summary.contacts} />
+      </View>
+
+      {profile?.public_code ? (
+        <SectionCard
+          title="Seu código de identificação"
+          description="Compartilhe este código com tutor ou cuidador para liberar o contato. Ele é permanente.">
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => router.push('/profile')}
+            style={({ pressed }) => [styles.codeCard, pressed && styles.codeCardPressed]}>
+            <Text selectable style={styles.code}>{profile.public_code}</Text>
+            <Text style={styles.codeHint}>Abrir perfil</Text>
+          </Pressable>
+        </SectionCard>
+      ) : null}
+
+      <SectionCard
+        title="O que você quer fazer?"
+        description="O MVP agora parte da relação entre duas pessoas e do evento de hospedagem.">
+        <ActionCard
+          title="Hospedagens"
+          description="Veja eventos atuais e o histórico de cuidados."
+          onPress={() => router.push('/hosting')}
+        />
+        <ActionCard
+          title="Contatos"
+          description="Adicione alguém pelo código HP e prepare uma hospedagem."
+          onPress={() => router.push('/contacts')}
+        />
         <ActionCard
           title="Meus pets"
-          description={`${pets.length} pet(s) vinculado(s) a esta conta`}
-          status="Ver e atualizar"
-          onPress={() => router.navigate('/pets/index')}
-        />
-        <ActionCard
-          title="Perfil de tutor"
-          description={tutor ? `${tutor.location.cityName} - ${tutor.location.stateCode}` : 'Ainda não ativado'}
-          status={tutor ? 'Conferir perfil' : 'Cadastrar'}
-          onPress={() => router.push(tutor ? '/profile/tutor' : '/tutor/edit')}
-        />
-        <ActionCard
-          title="Perfil de cuidador"
-          description={caregiver ? `${caregiver.experienceYears} ano(s) de experiência` : 'Ainda não ativado'}
-          status={caregiver ? 'Conferir perfil' : 'Cadastrar'}
-          onPress={() => router.push(caregiver ? '/profile/caregiver' : '/caregiver/edit')}
+          description={`${summary.pets} pet(s) no seu dossiê`}
+          onPress={() => router.push('/pets')}
         />
       </SectionCard>
 
-      <View style={styles.monitorCard}>
-        <View
-          style={[
-            styles.statusDot,
-            monitorStatus === 'online' && styles.statusOnline,
-            monitorStatus === 'offline' && styles.statusOffline,
-          ]}
-        />
-        <View style={styles.monitorCopy}>
-          <Text style={styles.monitorTitle}>
-            {monitorStatus === 'online'
-              ? 'Monitor local conectado'
-              : monitorStatus === 'checking'
-                ? 'Verificando monitor local...'
-                : 'Monitor opcional desconectado'}
-          </Text>
-          <Text style={styles.monitorText}>O cadastro funciona normalmente mesmo sem o monitor.</Text>
-        </View>
+      <View style={styles.promiseCard}>
+        <Text style={styles.promiseTitle}>Porque deixar seu pet com alguém não precisa significar ficar sem saber como ele está.</Text>
+        <Text style={styles.promiseText}>🐶 🐱 💛</Text>
       </View>
-
-      <PrimaryButton label="Cadastrar novo pet" onPress={() => router.push('/pets/new')} />
-
-      <Text style={styles.devNote}>
-        Câmera, upload remoto, GPS, notificações, pagamentos e sincronização em segundo plano estão desligados.
-      </Text>
     </ScreenShell>
   );
 }
 
-function MetricCard({ label, value }: { label: string; value: string }) {
+function MetricCard({ label, value }: { label: string; value: number }) {
   return (
     <View style={styles.metricCard}>
       <Text style={styles.metricValue}>{value}</Text>
@@ -114,17 +133,14 @@ function MetricCard({ label, value }: { label: string; value: string }) {
 function ActionCard({
   title,
   description,
-  status,
   onPress,
 }: {
   title: string;
   description: string;
-  status: string;
   onPress: () => void;
 }) {
   return (
     <Pressable
-      accessibilityLabel={`${title}. ${description}. ${status}`}
       accessibilityRole="button"
       onPress={onPress}
       style={({ pressed }) => [styles.actionCard, pressed && styles.actionPressed]}>
@@ -132,33 +148,82 @@ function ActionCard({
         <Text style={styles.actionTitle}>{title}</Text>
         <Text style={styles.actionDescription}>{description}</Text>
       </View>
-      <Text style={styles.actionStatus}>{status}</Text>
+      <Text style={styles.actionArrow}>›</Text>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
+  hero: {
+    padding: spacing.xl,
+    borderRadius: radii.xl,
+    backgroundColor: colors.primarySoft,
+    gap: spacing.md,
+  },
+  heroKicker: {
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 1.2,
+  },
+  heroTitle: {
+    color: colors.text,
+    fontSize: 22,
+    fontWeight: '900',
+    lineHeight: 28,
+  },
+  heroText: {
+    color: colors.textMuted,
+    fontSize: 14,
+    lineHeight: 21,
+  },
   metrics: {
     flexDirection: 'row',
-    gap: spacing.md,
+    gap: spacing.sm,
   },
   metricCard: {
     flex: 1,
-    padding: spacing.lg,
+    minHeight: 88,
+    padding: spacing.md,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radii.lg,
     backgroundColor: colors.surface,
+    justifyContent: 'center',
   },
   metricValue: {
     color: colors.primary,
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: '900',
   },
   metricLabel: {
     marginTop: spacing.xs,
     color: colors.textMuted,
-    fontSize: 13,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  codeCard: {
+    padding: spacing.lg,
+    borderRadius: radii.md,
+    backgroundColor: colors.accentSoft,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  codeCardPressed: {
+    opacity: 0.78,
+  },
+  code: {
+    color: colors.primary,
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: 1.4,
+  },
+  codeHint: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '800',
   },
   actionCard: {
     minHeight: 76,
@@ -180,59 +245,34 @@ const styles = StyleSheet.create({
   actionTitle: {
     color: colors.text,
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '900',
   },
   actionDescription: {
     marginTop: spacing.xs,
     color: colors.textMuted,
     fontSize: 13,
+    lineHeight: 18,
   },
-  actionStatus: {
-    maxWidth: 90,
+  actionArrow: {
     color: colors.primary,
-    fontSize: 12,
-    fontWeight: '800',
-    textAlign: 'right',
+    fontSize: 28,
+    fontWeight: '500',
   },
-  monitorCard: {
-    padding: spacing.lg,
-    borderRadius: radii.md,
+  promiseCard: {
+    padding: spacing.xl,
+    borderRadius: radii.lg,
     backgroundColor: colors.surfaceMuted,
-    flexDirection: 'row',
-    gap: spacing.md,
+    gap: spacing.sm,
   },
-  statusDot: {
-    width: 10,
-    height: 10,
-    marginTop: 5,
-    borderRadius: radii.round,
-    backgroundColor: colors.warning,
-  },
-  statusOnline: {
-    backgroundColor: colors.success,
-  },
-  statusOffline: {
-    backgroundColor: colors.error,
-  },
-  monitorCopy: {
-    flex: 1,
-  },
-  monitorTitle: {
+  promiseTitle: {
     color: colors.text,
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '800',
+    lineHeight: 23,
+    textAlign: 'center',
   },
-  monitorText: {
-    marginTop: spacing.xs,
-    color: colors.textMuted,
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  devNote: {
-    paddingHorizontal: spacing.md,
-    color: colors.textMuted,
-    fontSize: 12,
-    lineHeight: 18,
+  promiseText: {
+    fontSize: 20,
     textAlign: 'center',
   },
 });
