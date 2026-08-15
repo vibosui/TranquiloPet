@@ -20,7 +20,7 @@ function Wait-Until {
         return $true
       }
     } catch {
-      # O serviço pode ainda estar inicializando.
+      # O servico pode ainda estar inicializando.
     }
 
     Start-Sleep -Milliseconds $DelayMilliseconds
@@ -31,7 +31,19 @@ function Wait-Until {
 
 $ngrokCommand = Get-Command ngrok -ErrorAction SilentlyContinue
 if ($null -eq $ngrokCommand) {
-  throw 'ngrok nao encontrado. Instale o ngrok CLI e autentique a conta antes de executar npm.cmd run dev:tunnel.'
+  throw 'ngrok CLI nao encontrado. Instale e autentique o ngrok antes de executar npm.cmd run dev:tunnel.'
+}
+
+$expoNgrokInstalled = $false
+try {
+  $globalExpoNgrok = & npm.cmd list -g @expo/ngrok --depth=0 2>$null
+  $expoNgrokInstalled = ($LASTEXITCODE -eq 0) -and (($globalExpoNgrok -join "`n") -match '@expo/ngrok@')
+} catch {
+  $expoNgrokInstalled = $false
+}
+
+if (-not $expoNgrokInstalled) {
+  throw 'O tunnel do Expo precisa de @expo/ngrok global. Execute: npm.cmd install -g @expo/ngrok'
 }
 
 if (-not (Test-Path -LiteralPath $monitorExecutable)) {
@@ -68,7 +80,7 @@ try {
   }
 
   if (-not $ngrokReady) {
-    throw 'O ngrok nao publicou o monitor. Confira sua autenticacao com ngrok config check e tente novamente.'
+    throw 'O ngrok nao publicou o monitor. Confira a autenticacao com ngrok config check e tente novamente.'
   }
 
   $tunnels = Invoke-RestMethod -Uri 'http://127.0.0.1:4040/api/tunnels' -TimeoutSec 2
