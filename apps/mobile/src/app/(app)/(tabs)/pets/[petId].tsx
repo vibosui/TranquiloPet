@@ -1,178 +1,919 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 
 import { ErrorBanner } from '@/components/error-banner';
-import { InfoRow } from '@/components/info-row';
-import { PhotoGallery } from '@/components/photo-gallery';
+import { FormField } from '@/components/form-field';
 import { PrimaryButton } from '@/components/primary-button';
-import { ProfileAvatar } from '@/components/profile-avatar';
 import { ScreenShell } from '@/components/screen-shell';
 import { SectionCard } from '@/components/section-card';
-import { useAppData } from '@/core/state/app-data-context';
-import { trackUsageInBackground } from '@/features/analytics/usage-tracker';
-import {
-  labelForOption,
-  petBehaviorOptions,
-  petCareOptions,
-  petSizeOptions,
-  petSpeciesOptions,
-} from '@/features/pets/domain/pet-options';
+import { supabase } from '@/core/supabase/client';
 import { colors, radii, spacing } from '@/theme/tokens';
+
+type NullableBoolean = boolean | null;
+
+type Medication = {
+  name: string;
+  dosage: string;
+  schedule: string;
+  administration: string;
+  period: string;
+};
+
+type PetDossier = {
+  behavior: {
+    traits: string[];
+    strangers_reaction: string;
+    other_pets: string;
+    fears_or_discomforts: string;
+    forbidden_actions: string;
+  };
+  feeding: {
+    types: string[];
+    brand: string;
+    amount: string;
+    unit: string;
+    morning: string;
+    afternoon: string;
+    evening: string;
+    other_time: string;
+    treats_allowed: NullableBoolean;
+    treats_details: string;
+    forbidden_foods: string;
+  };
+  water: {
+    drinks_normally: NullableBoolean;
+    special_instructions: string;
+    change_frequency: string;
+  };
+  walks: {
+    count_per_day: string;
+    usual_times: string;
+    average_duration: string;
+    equipment: string[];
+    behaviors: string[];
+    instructions: string;
+  };
+  routine: {
+    wake_time: string;
+    sleep_time: string;
+    sleeping_places: string[];
+    stays_alone: NullableBoolean;
+    alone_duration: string;
+    habits: string;
+  };
+  objects: {
+    attachment_objects: string[];
+    description: string;
+    bringing_to_hosting: NullableBoolean;
+  };
+  health: {
+    conditions: string;
+    allergies: string;
+    dietary_restrictions: string;
+    surgery_or_other: string;
+  };
+  medications: Medication[];
+  emergency: {
+    tutor_name: string;
+    tutor_phone: string;
+    tutor_whatsapp: string;
+    contact_name: string;
+    contact_phone: string;
+    vet_name: string;
+    clinic: string;
+    vet_phone: string;
+    vet_address: string;
+    authorization: string;
+  };
+  additional_notes: string;
+  dossier_version: number;
+};
+
+type PetRow = {
+  id: string;
+  name: string;
+  species: string;
+  breed: string | null;
+  sex: string | null;
+  birth_date: string | null;
+  approximate_weight_kg: number | null;
+  size: string | null;
+  identification_notes: string | null;
+  dossier: Partial<PetDossier> | null;
+};
+
+const emptyDossier: PetDossier = {
+  behavior: {
+    traits: [],
+    strangers_reaction: '',
+    other_pets: '',
+    fears_or_discomforts: '',
+    forbidden_actions: '',
+  },
+  feeding: {
+    types: [],
+    brand: '',
+    amount: '',
+    unit: '',
+    morning: '',
+    afternoon: '',
+    evening: '',
+    other_time: '',
+    treats_allowed: null,
+    treats_details: '',
+    forbidden_foods: '',
+  },
+  water: {
+    drinks_normally: null,
+    special_instructions: '',
+    change_frequency: '',
+  },
+  walks: {
+    count_per_day: '',
+    usual_times: '',
+    average_duration: '',
+    equipment: [],
+    behaviors: [],
+    instructions: '',
+  },
+  routine: {
+    wake_time: '',
+    sleep_time: '',
+    sleeping_places: [],
+    stays_alone: null,
+    alone_duration: '',
+    habits: '',
+  },
+  objects: {
+    attachment_objects: [],
+    description: '',
+    bringing_to_hosting: null,
+  },
+  health: {
+    conditions: '',
+    allergies: '',
+    dietary_restrictions: '',
+    surgery_or_other: '',
+  },
+  medications: [],
+  emergency: {
+    tutor_name: '',
+    tutor_phone: '',
+    tutor_whatsapp: '',
+    contact_name: '',
+    contact_phone: '',
+    vet_name: '',
+    clinic: '',
+    vet_phone: '',
+    vet_address: '',
+    authorization: '',
+  },
+  additional_notes: '',
+  dossier_version: 1,
+};
+
+function normalizeDossier(input: Partial<PetDossier> | null | undefined): PetDossier {
+  return {
+    behavior: { ...emptyDossier.behavior, ...(input?.behavior ?? {}) },
+    feeding: { ...emptyDossier.feeding, ...(input?.feeding ?? {}) },
+    water: { ...emptyDossier.water, ...(input?.water ?? {}) },
+    walks: { ...emptyDossier.walks, ...(input?.walks ?? {}) },
+    routine: { ...emptyDossier.routine, ...(input?.routine ?? {}) },
+    objects: { ...emptyDossier.objects, ...(input?.objects ?? {}) },
+    health: { ...emptyDossier.health, ...(input?.health ?? {}) },
+    medications: Array.isArray(input?.medications) ? input.medications : [],
+    emergency: { ...emptyDossier.emergency, ...(input?.emergency ?? {}) },
+    additional_notes: input?.additional_notes ?? '',
+    dossier_version: 1,
+  };
+}
 
 export default function PetDetailsScreen() {
   const router = useRouter();
   const { petId } = useLocalSearchParams<{ petId: string }>();
-  const { currentUser, getPetById } = useAppData();
-  const pet = getPetById(petId);
-  const canViewPet = Boolean(pet && currentUser && pet.ownerUserId === currentUser.id);
+  const [pet, setPet] = useState<PetRow | null>(null);
+  const [dossier, setDossier] = useState<PetDossier>(emptyDossier);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    if (canViewPet) {
-      trackUsageInBackground({ eventName: 'pet_profile_viewed', screen: 'pet_profile' });
+    let active = true;
+
+    async function loadPet() {
+      setLoading(true);
+      const { data, error: queryError } = await supabase
+        .from('pets')
+        .select(
+          'id, name, species, breed, sex, birth_date, approximate_weight_kg, size, identification_notes, dossier',
+        )
+        .eq('id', petId)
+        .single();
+
+      if (!active) return;
+      if (queryError || !data) {
+        setError('O pet não foi encontrado ou você não tem acesso a este dossiê.');
+      } else {
+        const row = data as PetRow;
+        setPet(row);
+        setDossier(normalizeDossier(row.dossier));
+      }
+      setLoading(false);
     }
-  }, [canViewPet, currentUser?.id, pet?.id]);
 
-  if (!currentUser) return null;
+    void loadPet();
+    return () => {
+      active = false;
+    };
+  }, [petId]);
 
-  if (!pet || pet.ownerUserId !== currentUser.id) {
+  const completion = useMemo(() => {
+    const groups = [
+      dossier.behavior.traits.length > 0 || Boolean(dossier.behavior.strangers_reaction),
+      dossier.feeding.types.length > 0 && Boolean(dossier.feeding.amount),
+      dossier.water.drinks_normally !== null || Boolean(dossier.water.special_instructions),
+      Boolean(dossier.walks.count_per_day),
+      Boolean(dossier.routine.wake_time || dossier.routine.sleep_time || dossier.routine.habits),
+      dossier.objects.attachment_objects.length > 0 || dossier.objects.bringing_to_hosting !== null,
+      Boolean(
+        dossier.health.conditions ||
+          dossier.health.allergies ||
+          dossier.health.dietary_restrictions ||
+          dossier.health.surgery_or_other,
+      ),
+      dossier.medications.length > 0,
+      Boolean(dossier.emergency.tutor_phone || dossier.emergency.contact_phone),
+      Boolean(dossier.additional_notes),
+    ];
+    return Math.round((groups.filter(Boolean).length / groups.length) * 100);
+  }, [dossier]);
+
+  function patchSection<K extends keyof PetDossier>(section: K, value: PetDossier[K]) {
+    setDossier((current) => ({ ...current, [section]: value }));
+    setSaved(false);
+  }
+
+  async function saveDossier() {
+    if (!pet || saving) return;
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+
+    const { error: updateError } = await supabase
+      .from('pets')
+      .update({ dossier })
+      .eq('id', pet.id);
+
+    if (updateError) {
+      setError('Não foi possível salvar o dossiê agora.');
+    } else {
+      setSaved(true);
+    }
+    setSaving(false);
+  }
+
+  if (loading) {
+    return (
+      <ScreenShell onBack={() => router.back()} title="Conheça meu pet">
+        <View style={styles.loading}>
+          <ActivityIndicator color={colors.primary} size="large" />
+        </View>
+      </ScreenShell>
+    );
+  }
+
+  if (!pet) {
     return (
       <ScreenShell onBack={() => router.back()} title="Pet não encontrado">
-        <ErrorBanner message="O pet não existe ou pertence a outra conta de demonstração." />
+        <ErrorBanner message={error ?? 'Não foi possível abrir o dossiê.'} />
       </ScreenShell>
     );
   }
 
   return (
     <ScreenShell
-      eyebrow="PERFIL DO PET"
+      eyebrow="CONHEÇA MEU PET"
       onBack={() => router.back()}
-      title="Verificar informações"
-      subtitle="Revise os dados antes de solicitar um cuidador.">
-      <View style={styles.identity}>
-        <ProfileAvatar name={pet.name} size={96} uri={pet.photos.profileUri} />
-        <View style={styles.identityCopy}>
-          <Text style={styles.name}>{pet.name}</Text>
-          <Text style={styles.summary}>
-            {labelForOption(petSpeciesOptions, pet.species)}
-            {pet.breed ? ` · ${pet.breed}` : ''}
-          </Text>
+      title={pet.name}
+      subtitle="Conte tudo o que possa fazer diferença. Essas informações serão congeladas em um snapshot quando uma hospedagem for criada.">
+      <View style={styles.progressCard}>
+        <View style={styles.progressHeader}>
+          <Text style={styles.progressTitle}>Dossiê de cuidado</Text>
+          <Text style={styles.progressValue}>{completion}%</Text>
         </View>
+        <View style={styles.progressTrack}>
+          <View style={[styles.progressFill, { width: `${completion}%` }]} />
+        </View>
+        <Text style={styles.progressText}>Não precisa preencher tudo de uma vez. Salve e continue depois.</Text>
       </View>
 
-      <SectionCard title="Identificação">
-        <InfoRow label="Espécie" value={labelForOption(petSpeciesOptions, pet.species)} />
-        <InfoRow label="Raça" value={pet.breed || undefined} />
-        <InfoRow label="Idade" value={pet.ageYears === null ? undefined : `${pet.ageYears} ano(s)`} />
-        <InfoRow label="Porte" value={labelForOption(petSizeOptions, pet.size)} />
-        <InfoRow label="Características" last value={pet.characteristics || undefined} />
-      </SectionCard>
+      {error ? <ErrorBanner message={error} /> : null}
+      {saved ? <View style={styles.savedBanner}><Text style={styles.savedText}>✓ Dossiê salvo no Supabase.</Text></View> : null}
 
-      <SectionCard title="Cuidados especiais">
-        <TagList
-          empty="Nenhum cuidado especial marcado."
-          labels={pet.careTags.map((tag) => labelForOption(petCareOptions, tag))}
+      <SectionCard title="🐶 1. Identificação" description="Dados cadastrados na criação do pet.">
+        <ReadOnlyRow label="Espécie" value={speciesLabel(pet.species)} />
+        <ReadOnlyRow label="Raça" value={pet.breed || 'Não informada'} />
+        <ReadOnlyRow label="Sexo" value={sexLabel(pet.sex)} />
+        <ReadOnlyRow label="Nascimento" value={pet.birth_date || 'Não informado'} />
+        <ReadOnlyRow
+          label="Peso aproximado"
+          value={pet.approximate_weight_kg ? `${pet.approximate_weight_kg} kg` : 'Não informado'}
         />
-        {pet.careTags.includes('medication') && pet.medicationDetails ? (
-          <View style={styles.noteBlock}>
-            <Text style={styles.noteLabel}>Medicação</Text>
-            <Text style={styles.notes}>{pet.medicationDetails}</Text>
-          </View>
-        ) : null}
-        {pet.additionalNotes ? (
-          <View style={styles.noteBlock}>
-            <Text style={styles.noteLabel}>Observações adicionais</Text>
-            <Text style={styles.notes}>{pet.additionalNotes}</Text>
-          </View>
-        ) : null}
+        <ReadOnlyRow label="Porte" value={sizeLabel(pet.size)} />
+        <ReadOnlyRow label="Características" value={pet.identification_notes || 'Não informadas'} last />
       </SectionCard>
 
-      <SectionCard title="Análise comportamental">
-        <TagList
-          empty="Nenhuma característica comportamental marcada."
-          labels={pet.behavior.traits.map((tag) => labelForOption(petBehaviorOptions, tag))}
+      <SectionCard title="❤️ 2. Sobre o jeito do meu pet">
+        <MultiChoice
+          label="Como você descreveria seu pet?"
+          values={dossier.behavior.traits}
+          options={[
+            ['calm', 'Calmo'],
+            ['playful', 'Brincalhão'],
+            ['agitated', 'Agitado'],
+            ['affectionate', 'Carinhoso'],
+            ['independent', 'Independente'],
+            ['fearful', 'Medroso'],
+            ['anxious', 'Ansioso'],
+            ['social', 'Sociável'],
+            ['reserved', 'Reservado'],
+            ['territorial', 'Territorial'],
+          ]}
+          onChange={(traits) => patchSection('behavior', { ...dossier.behavior, traits })}
         />
-        {pet.behavior.notes ? <Text style={styles.notes}>{pet.behavior.notes}</Text> : null}
+        <SingleChoice
+          label="Como reage a pessoas que não conhece?"
+          value={dossier.behavior.strangers_reaction}
+          options={[
+            ['approaches', 'Se aproxima facilmente'],
+            ['suspicious', 'É desconfiado no início'],
+            ['afraid', 'Tem medo'],
+            ['aggressive_risk', 'Pode apresentar comportamento agressivo'],
+          ]}
+          onChange={(strangers_reaction) =>
+            patchSection('behavior', { ...dossier.behavior, strangers_reaction })
+          }
+        />
+        <SingleChoice
+          label="Como se comporta com outros pets?"
+          value={dossier.behavior.other_pets}
+          options={[
+            ['loves', 'Adora outros animais'],
+            ['adaptation', 'Convive bem, mas precisa de adaptação'],
+            ['alone', 'Prefere ficar sozinho'],
+            ['poor', 'Não convive bem'],
+            ['unknown', 'Não sei'],
+          ]}
+          onChange={(other_pets) => patchSection('behavior', { ...dossier.behavior, other_pets })}
+        />
+        <FormField
+          label="O que assusta, irrita ou deixa seu pet desconfortável?"
+          multiline
+          textAlignVertical="top"
+          value={dossier.behavior.fears_or_discomforts}
+          onChangeText={(fears_or_discomforts) =>
+            patchSection('behavior', { ...dossier.behavior, fears_or_discomforts })
+          }
+        />
+        <FormField
+          label="Existe alguma coisa que o cuidador NÃO deve fazer?"
+          multiline
+          textAlignVertical="top"
+          value={dossier.behavior.forbidden_actions}
+          onChangeText={(forbidden_actions) =>
+            patchSection('behavior', { ...dossier.behavior, forbidden_actions })
+          }
+        />
       </SectionCard>
 
-      <SectionCard title="Fotos adicionais">
-        <PhotoGallery uris={pet.photos.galleryUris} />
+      <SectionCard title="🍖 3. Alimentação">
+        <MultiChoice
+          label="O que seu pet come?"
+          values={dossier.feeding.types}
+          options={[
+            ['kibble', 'Ração'],
+            ['natural', 'Alimentação natural'],
+            ['mixed', 'Ração + natural'],
+            ['other', 'Outro'],
+          ]}
+          onChange={(types) => patchSection('feeding', { ...dossier.feeding, types })}
+        />
+        <FormField
+          label="Marca/tipo da alimentação"
+          value={dossier.feeding.brand}
+          onChangeText={(brand) => patchSection('feeding', { ...dossier.feeding, brand })}
+        />
+        <View style={styles.twoColumns}>
+          <View style={styles.flexOne}>
+            <FormField
+              label="Quantidade/refeição"
+              value={dossier.feeding.amount}
+              onChangeText={(amount) => patchSection('feeding', { ...dossier.feeding, amount })}
+            />
+          </View>
+          <View style={styles.flexOne}>
+            <FormField
+              label="Unidade"
+              placeholder="g, xícara..."
+              value={dossier.feeding.unit}
+              onChangeText={(unit) => patchSection('feeding', { ...dossier.feeding, unit })}
+            />
+          </View>
+        </View>
+        <Text style={styles.subheading}>Horários habituais</Text>
+        <View style={styles.twoColumns}>
+          <View style={styles.flexOne}><FormField label="Manhã" placeholder="08:00" value={dossier.feeding.morning} onChangeText={(morning) => patchSection('feeding', { ...dossier.feeding, morning })} /></View>
+          <View style={styles.flexOne}><FormField label="Tarde" placeholder="13:00" value={dossier.feeding.afternoon} onChangeText={(afternoon) => patchSection('feeding', { ...dossier.feeding, afternoon })} /></View>
+        </View>
+        <View style={styles.twoColumns}>
+          <View style={styles.flexOne}><FormField label="Noite" placeholder="19:00" value={dossier.feeding.evening} onChangeText={(evening) => patchSection('feeding', { ...dossier.feeding, evening })} /></View>
+          <View style={styles.flexOne}><FormField label="Outro" placeholder="23:00" value={dossier.feeding.other_time} onChangeText={(other_time) => patchSection('feeding', { ...dossier.feeding, other_time })} /></View>
+        </View>
+        <BooleanChoice
+          label="Pode receber petiscos?"
+          value={dossier.feeding.treats_allowed}
+          onChange={(treats_allowed) => patchSection('feeding', { ...dossier.feeding, treats_allowed })}
+        />
+        {dossier.feeding.treats_allowed ? (
+          <FormField
+            label="Quais e em qual quantidade?"
+            value={dossier.feeding.treats_details}
+            onChangeText={(treats_details) => patchSection('feeding', { ...dossier.feeding, treats_details })}
+          />
+        ) : null}
+        <FormField
+          label="Alimentos que NÃO pode consumir"
+          multiline
+          textAlignVertical="top"
+          value={dossier.feeding.forbidden_foods}
+          onChangeText={(forbidden_foods) => patchSection('feeding', { ...dossier.feeding, forbidden_foods })}
+        />
       </SectionCard>
 
-      <PrimaryButton
-        label="Editar informações do pet"
-        onPress={() =>
-          router.push({ pathname: '/pets/[petId]/edit', params: { petId: pet.id } })
-        }
-      />
+      <SectionCard title="💧 4. Água">
+        <BooleanChoice
+          label="Ele bebe água normalmente?"
+          value={dossier.water.drinks_normally}
+          onChange={(drinks_normally) => patchSection('water', { ...dossier.water, drinks_normally })}
+        />
+        <FormField
+          label="Orientação especial"
+          multiline
+          value={dossier.water.special_instructions}
+          onChangeText={(special_instructions) => patchSection('water', { ...dossier.water, special_instructions })}
+        />
+        <FormField
+          label="Com que frequência costuma trocar a água?"
+          value={dossier.water.change_frequency}
+          onChangeText={(change_frequency) => patchSection('water', { ...dossier.water, change_frequency })}
+        />
+      </SectionCard>
+
+      <SectionCard title="🦮 5. Passeios">
+        <SingleChoice
+          label="Quantos passeios costuma fazer por dia?"
+          value={dossier.walks.count_per_day}
+          options={[
+            ['0', 'Nenhum'],
+            ['1', '1'],
+            ['2', '2'],
+            ['3+', '3 ou mais'],
+          ]}
+          onChange={(count_per_day) => patchSection('walks', { ...dossier.walks, count_per_day })}
+        />
+        <FormField label="Horários habituais" value={dossier.walks.usual_times} onChangeText={(usual_times) => patchSection('walks', { ...dossier.walks, usual_times })} />
+        <FormField label="Duração média" placeholder="Ex.: 30 minutos" value={dossier.walks.average_duration} onChangeText={(average_duration) => patchSection('walks', { ...dossier.walks, average_duration })} />
+        <MultiChoice
+          label="Utiliza"
+          values={dossier.walks.equipment}
+          options={[
+            ['collar', 'Coleira'],
+            ['harness', 'Peitoral'],
+            ['leash', 'Guia'],
+            ['retractable', 'Guia retrátil'],
+            ['other', 'Outro'],
+          ]}
+          onChange={(equipment) => patchSection('walks', { ...dossier.walks, equipment })}
+        />
+        <MultiChoice
+          label="Durante o passeio"
+          values={dossier.walks.behaviors}
+          options={[
+            ['pulls', 'Puxa a guia'],
+            ['escapes', 'Tenta fugir'],
+            ['barks_dogs', 'Late para outros cães'],
+            ['reactive_animals', 'Reage a outros animais'],
+            ['afraid_cars', 'Tem medo de carros'],
+            ['afraid_people', 'Tem medo de pessoas'],
+            ['calm', 'É tranquilo'],
+          ]}
+          onChange={(behaviors) => patchSection('walks', { ...dossier.walks, behaviors })}
+        />
+        <FormField label="Orientação específica para os passeios" multiline value={dossier.walks.instructions} onChangeText={(instructions) => patchSection('walks', { ...dossier.walks, instructions })} />
+      </SectionCard>
+
+      <SectionCard title="💤 6. Rotina">
+        <View style={styles.twoColumns}>
+          <View style={styles.flexOne}><FormField label="Acorda" placeholder="07:00" value={dossier.routine.wake_time} onChangeText={(wake_time) => patchSection('routine', { ...dossier.routine, wake_time })} /></View>
+          <View style={styles.flexOne}><FormField label="Dorme" placeholder="22:00" value={dossier.routine.sleep_time} onChangeText={(sleep_time) => patchSection('routine', { ...dossier.routine, sleep_time })} /></View>
+        </View>
+        <MultiChoice
+          label="Onde costuma dormir?"
+          values={dossier.routine.sleeping_places}
+          options={[
+            ['bed', 'Cama'],
+            ['crate', 'Caixa de transporte'],
+            ['room', 'Quarto'],
+            ['outside', 'Área externa'],
+            ['sofa', 'Sofá'],
+            ['with_tutor', 'Com o tutor'],
+            ['other', 'Outro'],
+          ]}
+          onChange={(sleeping_places) => patchSection('routine', { ...dossier.routine, sleeping_places })}
+        />
+        <BooleanChoice label="Ele costuma ficar sozinho?" value={dossier.routine.stays_alone} onChange={(stays_alone) => patchSection('routine', { ...dossier.routine, stays_alone })} />
+        {dossier.routine.stays_alone ? <FormField label="Por quanto tempo normalmente?" value={dossier.routine.alone_duration} onChangeText={(alone_duration) => patchSection('routine', { ...dossier.routine, alone_duration })} /> : null}
+        <FormField label="Hábitos ou rotinas que o cuidador deve manter" hint="Ex.: dorme depois do almoço, brinca antes de dormir..." multiline value={dossier.routine.habits} onChangeText={(habits) => patchSection('routine', { ...dossier.routine, habits })} />
+      </SectionCard>
+
+      <SectionCard title="🧸 7. Brinquedos e objetos">
+        <MultiChoice
+          label="Objetos importantes ou de apego"
+          values={dossier.objects.attachment_objects}
+          options={[
+            ['toy', 'Brinquedo'],
+            ['blanket', 'Cobertor'],
+            ['bed', 'Cama'],
+            ['cloth', 'Paninho'],
+            ['other', 'Outro'],
+            ['none', 'Não possui'],
+          ]}
+          onChange={(attachment_objects) => patchSection('objects', { ...dossier.objects, attachment_objects })}
+        />
+        <FormField label="Qual?" value={dossier.objects.description} onChangeText={(description) => patchSection('objects', { ...dossier.objects, description })} />
+        <BooleanChoice label="Normalmente vai para hospedagem com esses itens?" value={dossier.objects.bringing_to_hosting} onChange={(bringing_to_hosting) => patchSection('objects', { ...dossier.objects, bringing_to_hosting })} />
+      </SectionCard>
+
+      <SectionCard title="🩺 8. Saúde">
+        <FormField label="Condições de saúde" placeholder="Se não possui, deixe em branco." multiline value={dossier.health.conditions} onChangeText={(conditions) => patchSection('health', { ...dossier.health, conditions })} />
+        <FormField label="Alergias" multiline value={dossier.health.allergies} onChangeText={(allergies) => patchSection('health', { ...dossier.health, allergies })} />
+        <FormField label="Restrições alimentares" multiline value={dossier.health.dietary_restrictions} onChangeText={(dietary_restrictions) => patchSection('health', { ...dossier.health, dietary_restrictions })} />
+        <FormField label="Cirurgias ou outras condições importantes" multiline value={dossier.health.surgery_or_other} onChangeText={(surgery_or_other) => patchSection('health', { ...dossier.health, surgery_or_other })} />
+      </SectionCard>
+
+      <SectionCard title="💊 9. Medicamentos" description="Cadastre um ou mais medicamentos. A hospedagem poderá transformar os horários em tarefas obrigatórias.">
+        {dossier.medications.map((medication, index) => (
+          <View key={`${index}-${medication.name}`} style={styles.medicationCard}>
+            <View style={styles.medicationHeader}>
+              <Text style={styles.medicationTitle}>Medicamento {index + 1}</Text>
+              <Pressable accessibilityRole="button" onPress={() => patchSection('medications', dossier.medications.filter((_, itemIndex) => itemIndex !== index))}>
+                <Text style={styles.removeText}>Remover</Text>
+              </Pressable>
+            </View>
+            <FormField label="Nome" value={medication.name} onChangeText={(name) => patchMedication(index, { ...medication, name }, dossier, patchSection)} />
+            <FormField label="Dosagem" value={medication.dosage} onChangeText={(dosage) => patchMedication(index, { ...medication, dosage }, dossier, patchSection)} />
+            <FormField label="Horário(s)" value={medication.schedule} onChangeText={(schedule) => patchMedication(index, { ...medication, schedule }, dossier, patchSection)} />
+            <FormField label="Como administrar" multiline value={medication.administration} onChangeText={(administration) => patchMedication(index, { ...medication, administration }, dossier, patchSection)} />
+            <FormField label="Período do tratamento" value={medication.period} onChangeText={(period) => patchMedication(index, { ...medication, period }, dossier, patchSection)} />
+          </View>
+        ))}
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => patchSection('medications', [...dossier.medications, { name: '', dosage: '', schedule: '', administration: '', period: '' }])}
+          style={({ pressed }) => [styles.addMedication, pressed && styles.choicePressed]}>
+          <Text style={styles.addMedicationText}>+ Adicionar medicamento</Text>
+        </Pressable>
+        <Text style={styles.helper}>A foto da embalagem/orientação veterinária será adicionada quando ligarmos o Storage à câmera/galeria.</Text>
+      </SectionCard>
+
+      <SectionCard title="🚨 10. Em caso de emergência">
+        <FormField label="Nome do tutor" value={dossier.emergency.tutor_name} onChangeText={(tutor_name) => patchSection('emergency', { ...dossier.emergency, tutor_name })} />
+        <View style={styles.twoColumns}>
+          <View style={styles.flexOne}><FormField label="Telefone" keyboardType="phone-pad" value={dossier.emergency.tutor_phone} onChangeText={(tutor_phone) => patchSection('emergency', { ...dossier.emergency, tutor_phone })} /></View>
+          <View style={styles.flexOne}><FormField label="WhatsApp" keyboardType="phone-pad" value={dossier.emergency.tutor_whatsapp} onChangeText={(tutor_whatsapp) => patchSection('emergency', { ...dossier.emergency, tutor_whatsapp })} /></View>
+        </View>
+        <FormField label="Contato de emergência" value={dossier.emergency.contact_name} onChangeText={(contact_name) => patchSection('emergency', { ...dossier.emergency, contact_name })} />
+        <FormField label="Telefone do contato" keyboardType="phone-pad" value={dossier.emergency.contact_phone} onChangeText={(contact_phone) => patchSection('emergency', { ...dossier.emergency, contact_phone })} />
+        <Text style={styles.subheading}>Veterinário de confiança</Text>
+        <FormField label="Nome" value={dossier.emergency.vet_name} onChangeText={(vet_name) => patchSection('emergency', { ...dossier.emergency, vet_name })} />
+        <FormField label="Clínica" value={dossier.emergency.clinic} onChangeText={(clinic) => patchSection('emergency', { ...dossier.emergency, clinic })} />
+        <FormField label="Telefone" keyboardType="phone-pad" value={dossier.emergency.vet_phone} onChangeText={(vet_phone) => patchSection('emergency', { ...dossier.emergency, vet_phone })} />
+        <FormField label="Endereço" multiline value={dossier.emergency.vet_address} onChangeText={(vet_address) => patchSection('emergency', { ...dossier.emergency, vet_address })} />
+        <SingleChoice
+          label="Em uma emergência, o cuidador poderá levar o pet para atendimento?"
+          value={dossier.emergency.authorization}
+          options={[
+            ['immediately', 'Sim, imediatamente'],
+            ['try_contact', 'Sim, mas tente falar comigo antes'],
+            ['only_authorized', 'Somente com minha autorização'],
+          ]}
+          onChange={(authorization) => patchSection('emergency', { ...dossier.emergency, authorization })}
+        />
+      </SectionCard>
+
+      <SectionCard
+        title="🎒 Itens enviados e 📸 registro de entrega"
+        description="Essas informações NÃO ficam neste dossiê. Elas serão preenchidas ao criar cada hospedagem, porque representam o que foi entregue e o estado do pet naquele evento específico." />
+
+      <SectionCard title="13. O que mais o cuidador precisa saber?">
+        <FormField
+          label="Observações adicionais"
+          multiline
+          textAlignVertical="top"
+          value={dossier.additional_notes}
+          onChangeText={(additional_notes) => patchSection('additional_notes', additional_notes)}
+        />
+      </SectionCard>
+
+      <PrimaryButton label="Salvar dossiê" loading={saving} onPress={() => void saveDossier()} />
     </ScreenShell>
   );
 }
 
-function TagList({ labels, empty }: { labels: readonly string[]; empty: string }) {
-  if (!labels.length) return <Text style={styles.empty}>{empty}</Text>;
+function patchMedication(
+  index: number,
+  medication: Medication,
+  dossier: PetDossier,
+  patchSection: <K extends keyof PetDossier>(section: K, value: PetDossier[K]) => void,
+) {
+  const medications = [...dossier.medications];
+  medications[index] = medication;
+  patchSection('medications', medications);
+}
+
+function speciesLabel(value: string) {
+  if (value === 'dog') return 'Cachorro';
+  if (value === 'cat') return 'Gato';
+  return 'Outro';
+}
+
+function sexLabel(value: string | null) {
+  if (value === 'male') return 'Macho';
+  if (value === 'female') return 'Fêmea';
+  return 'Não informado';
+}
+
+function sizeLabel(value: string | null) {
+  if (value === 'small') return 'Pequeno';
+  if (value === 'medium') return 'Médio';
+  if (value === 'large') return 'Grande';
+  return 'Não informado';
+}
+
+function ReadOnlyRow({ label, value, last = false }: { label: string; value: string; last?: boolean }) {
   return (
-    <View style={styles.tags}>
-      {labels.map((label) => (
-        <View key={label} style={styles.tag}>
-          <Text style={styles.tagText}>{label}</Text>
-        </View>
-      ))}
+    <View style={[styles.readOnlyRow, last && styles.readOnlyRowLast]}>
+      <Text style={styles.readOnlyLabel}>{label}</Text>
+      <Text style={styles.readOnlyValue}>{value}</Text>
+    </View>
+  );
+}
+
+function BooleanChoice({ label, value, onChange }: { label: string; value: NullableBoolean; onChange: (value: boolean) => void }) {
+  return (
+    <View style={styles.booleanRow}>
+      <Text style={styles.booleanLabel}>{label}</Text>
+      <View style={styles.booleanControls}>
+        <Text style={styles.booleanValue}>{value === null ? 'Não informado' : value ? 'Sim' : 'Não'}</Text>
+        <Switch
+          trackColor={{ false: colors.border, true: colors.primarySoft }}
+          thumbColor={value ? colors.primary : colors.surface}
+          value={value ?? false}
+          onValueChange={onChange}
+        />
+      </View>
+    </View>
+  );
+}
+
+function SingleChoice({ label, value, options, onChange }: { label: string; value: string; options: readonly (readonly [string, string])[]; onChange: (value: string) => void }) {
+  return (
+    <View style={styles.choiceGroup}>
+      <Text style={styles.choiceLabel}>{label}</Text>
+      <View style={styles.choices}>
+        {options.map(([key, optionLabel]) => {
+          const selected = value === key;
+          return (
+            <Pressable
+              key={key}
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+              onPress={() => onChange(key)}
+              style={({ pressed }) => [styles.choice, selected && styles.choiceSelected, pressed && styles.choicePressed]}>
+              <Text style={[styles.choiceText, selected && styles.choiceTextSelected]}>{optionLabel}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+function MultiChoice({ label, values, options, onChange }: { label: string; values: string[]; options: readonly (readonly [string, string])[]; onChange: (values: string[]) => void }) {
+  return (
+    <View style={styles.choiceGroup}>
+      <Text style={styles.choiceLabel}>{label}</Text>
+      <View style={styles.choices}>
+        {options.map(([key, optionLabel]) => {
+          const selected = values.includes(key);
+          return (
+            <Pressable
+              key={key}
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+              onPress={() => onChange(selected ? values.filter((item) => item !== key) : [...values, key])}
+              style={({ pressed }) => [styles.choice, selected && styles.choiceSelected, pressed && styles.choicePressed]}>
+              <Text style={[styles.choiceText, selected && styles.choiceTextSelected]}>{optionLabel}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  identity: {
-    flexDirection: 'row',
+  loading: {
+    minHeight: 300,
     alignItems: 'center',
-    gap: spacing.lg,
+    justifyContent: 'center',
   },
-  identityCopy: {
-    flex: 1,
+  progressCard: {
+    padding: spacing.lg,
+    borderRadius: radii.lg,
+    backgroundColor: colors.primarySoft,
+    gap: spacing.sm,
   },
-  name: {
+  progressHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  progressTitle: {
     color: colors.text,
-    fontSize: 24,
+    fontSize: 15,
     fontWeight: '900',
   },
-  summary: {
-    marginTop: spacing.xs,
-    color: colors.textMuted,
-    fontSize: 14,
+  progressValue: {
+    color: colors.primary,
+    fontSize: 16,
+    fontWeight: '900',
   },
-  tags: {
+  progressTrack: {
+    height: 8,
+    borderRadius: radii.round,
+    backgroundColor: colors.surface,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: radii.round,
+    backgroundColor: colors.primary,
+  },
+  progressText: {
+    color: colors.textMuted,
+    fontSize: 12,
+  },
+  savedBanner: {
+    padding: spacing.md,
+    borderRadius: radii.md,
+    backgroundColor: colors.successSoft,
+  },
+  savedText: {
+    color: colors.success,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  readOnlyRow: {
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    gap: spacing.xs,
+  },
+  readOnlyRowLast: {
+    borderBottomWidth: 0,
+  },
+  readOnlyLabel: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  readOnlyValue: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  choiceGroup: {
+    gap: spacing.sm,
+  },
+  choiceLabel: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  choices: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
   },
-  tag: {
+  choice: {
+    minHeight: 42,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
     borderRadius: radii.round,
-    backgroundColor: colors.primarySoft,
+    backgroundColor: colors.surface,
+    justifyContent: 'center',
   },
-  tagText: {
-    color: colors.primary,
-    fontSize: 12,
-    fontWeight: '700',
+  choiceSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primary,
   },
-  notes: {
-    color: colors.text,
-    fontSize: 14,
-    lineHeight: 21,
+  choicePressed: {
+    opacity: 0.72,
   },
-  noteBlock: {
-    gap: spacing.xs,
-  },
-  noteLabel: {
+  choiceText: {
     color: colors.textMuted,
     fontSize: 12,
     fontWeight: '800',
-    textTransform: 'uppercase',
   },
-  empty: {
+  choiceTextSelected: {
+    color: colors.surface,
+  },
+  booleanRow: {
+    paddingVertical: spacing.xs,
+    gap: spacing.sm,
+  },
+  booleanLabel: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  booleanControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  booleanValue: {
     color: colors.textMuted,
     fontSize: 13,
+    fontWeight: '700',
+  },
+  twoColumns: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  flexOne: {
+    flex: 1,
+  },
+  subheading: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '900',
+    marginTop: spacing.xs,
+  },
+  medicationCard: {
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    backgroundColor: colors.surfaceMuted,
+    gap: spacing.md,
+  },
+  medicationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  medicationTitle: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  removeText: {
+    color: colors.error,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  addMedication: {
+    minHeight: 48,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: radii.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addMedicationText: {
+    color: colors.primary,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  helper: {
+    color: colors.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
   },
 });
