@@ -39,6 +39,9 @@ const sessionId = `${Platform.OS}-${Date.now().toString(36)}-${Math.random()
   .toString(36)
   .slice(2, 8)}`;
 const monitorTimeoutMs = 3_000;
+const monitorHeaders = {
+  'ngrok-skip-browser-warning': '1',
+} as const;
 
 async function fetchMonitor(
   input: Parameters<typeof fetch>[0],
@@ -76,7 +79,10 @@ export async function trackUsage({ eventName, screen, metadata = {} }: UsageEven
   try {
     const response = await fetchMonitor(`${environment.monitorApiUrl}/api/events`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        ...monitorHeaders,
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify(payload),
     });
 
@@ -102,7 +108,9 @@ export async function checkMonitorConnection() {
   }
 
   try {
-    const response = await fetchMonitor(`${environment.monitorApiUrl}/api/health`);
+    const response = await fetchMonitor(`${environment.monitorApiUrl}/api/health`, {
+      headers: monitorHeaders,
+    });
     return response.ok ? ('online' as const) : ('offline' as const);
   } catch {
     return 'offline' as const;
