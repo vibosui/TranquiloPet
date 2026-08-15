@@ -175,8 +175,22 @@ def test_dashboard_is_local_only_but_phone_ingestion_is_available(tmp_path):
         assert response.status_code == 201
 
 
-def test_public_network_clients_are_rejected(tmp_path):
+def test_public_tunnel_allows_only_health_and_event_ingestion(tmp_path):
     settings = Settings(database_path=tmp_path / "public.sqlite3")
 
     with TestClient(create_app(settings), client=("8.8.8.8", 4321)) as public_client:
-        assert public_client.get("/api/health").status_code == 403
+        assert public_client.get("/").status_code == 403
+        assert public_client.get("/api/dashboard/snapshot").status_code == 403
+        assert public_client.get("/docs").status_code == 403
+        assert public_client.get("/api/health").status_code == 200
+
+        response = public_client.post(
+            "/api/events",
+            json={
+                "session_id": "android-session-tunnel",
+                "event_name": "app_opened",
+                "screen": "home",
+                "platform": "android",
+            },
+        )
+        assert response.status_code == 201
