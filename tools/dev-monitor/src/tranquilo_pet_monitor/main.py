@@ -19,6 +19,7 @@ from .service import MonitorService
 PACKAGE_ROOT = Path(__file__).resolve().parent
 WEB_ROOT = PACKAGE_ROOT / "web"
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "testclient"}
+PUBLIC_INGESTION_PATHS = {"/api/health", "/api/events"}
 LOCAL_ONLY_PATH_PREFIXES = (
     "/api/dashboard",
     "/static",
@@ -67,10 +68,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.middleware("http")
     async def local_security(request: Request, call_next):
         client_host = request.client.host if request.client else ""
-        if not _is_trusted_network_client(client_host):
+        is_trusted_client = _is_trusted_network_client(client_host)
+        is_public_ingestion = request.url.path in PUBLIC_INGESTION_PATHS
+
+        if not is_trusted_client and not is_public_ingestion:
             return JSONResponse(
                 status_code=status.HTTP_403_FORBIDDEN,
-                content={"detail": "Monitor available only on a private local network."},
+                content={"detail": "Monitor dashboard is available only on the local computer."},
             )
 
         is_local_only = request.url.path == "/" or request.url.path.startswith(
