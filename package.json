@@ -6,7 +6,6 @@
   "scripts": {
     "start": "npm run start --workspace=@tranquilo-pet/mobile",
     "start:tunnel": "npm run start:tunnel --workspace=@tranquilo-pet/mobile",
-    "dev:tunnel": "powershell -ExecutionPolicy Bypass -File .\\scripts\\start-tunnel.ps1",
     "android": "npm run android --workspace=@tranquilo-pet/mobile",
     "web": "npm run web --workspace=@tranquilo-pet/mobile",
     "monitor": "powershell -ExecutionPolicy Bypass -File .\\scripts\\start-dev-monitor.ps1",
