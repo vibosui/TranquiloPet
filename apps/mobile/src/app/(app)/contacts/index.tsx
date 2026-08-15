@@ -1,5 +1,6 @@
+import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ErrorBanner } from '@/components/error-banner';
 import { FormField } from '@/components/form-field';
@@ -24,7 +25,8 @@ type Contact = {
 };
 
 export default function ContactsScreen() {
-  const { user } = useAuth();
+  const router = useRouter();
+  const { profile: currentProfile, user } = useAuth();
   const [code, setCode] = useState('');
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
@@ -118,6 +120,12 @@ export default function ContactsScreen() {
       subtitle="Use o código permanente HP do outro usuário. A estrutura de solicitação já existe; durante o MVP o aceite é automático.">
       {error ? <ErrorBanner message={error} /> : null}
 
+      {!currentProfile?.tutor_enabled ? (
+        <View style={styles.infoBanner}>
+          <Text style={styles.infoText}>Para criar uma hospedagem a partir daqui, ative o papel de Tutor no seu perfil.</Text>
+        </View>
+      ) : null}
+
       <SectionCard
         title="Adicionar por código"
         description="Exemplo: HP-7K3M9Q. Letras ambíguas como I e O não são usadas.">
@@ -152,15 +160,37 @@ export default function ContactsScreen() {
           <View style={styles.contactList}>
             {contacts.map(({ connection, profile }) => (
               <View key={connection.id} style={styles.contactCard}>
-                <View style={styles.avatar}>
-                  <Text style={styles.avatarText}>
-                    {(profile?.full_name || '?').slice(0, 1).toUpperCase()}
-                  </Text>
+                <View style={styles.contactHeader}>
+                  <View style={styles.avatar}>
+                    <Text style={styles.avatarText}>
+                      {(profile?.full_name || '?').slice(0, 1).toUpperCase()}
+                    </Text>
+                  </View>
+                  <View style={styles.contactCopy}>
+                    <Text style={styles.contactName}>{profile?.full_name || 'Usuário Hospeda Patas'}</Text>
+                    <Text selectable style={styles.contactCode}>{profile?.public_code || 'Código indisponível'}</Text>
+                    <Text style={styles.roles}>
+                      {[profile?.tutor_enabled ? 'Tutor' : null, profile?.caregiver_enabled ? 'Cuidador' : null]
+                        .filter(Boolean)
+                        .join(' • ') || 'Nenhum papel ativo'}
+                    </Text>
+                  </View>
                 </View>
-                <View style={styles.contactCopy}>
-                  <Text style={styles.contactName}>{profile?.full_name || 'Usuário Hospeda Patas'}</Text>
-                  <Text selectable style={styles.contactCode}>{profile?.public_code || 'Código indisponível'}</Text>
-                </View>
+
+                {profile?.caregiver_enabled && currentProfile?.tutor_enabled ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() =>
+                      router.push({
+                        pathname: '/hosting/new',
+                        params: { connectionId: connection.id },
+                      })
+                    }
+                    style={({ pressed }) => [styles.hostingButton, pressed && styles.pressed]}>
+                    <Text style={styles.hostingButtonText}>Criar hospedagem com este cuidador</Text>
+                    <Text style={styles.hostingArrow}>›</Text>
+                  </Pressable>
+                ) : null}
               </View>
             ))}
           </View>
@@ -180,15 +210,29 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
+  infoBanner: {
+    padding: spacing.md,
+    borderRadius: radii.md,
+    backgroundColor: colors.accentSoft,
+  },
+  infoText: {
+    color: colors.text,
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '700',
+  },
   contactList: {
-    gap: spacing.sm,
+    gap: spacing.md,
   },
   contactCard: {
     padding: spacing.md,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radii.md,
+    borderRadius: radii.lg,
     backgroundColor: colors.background,
+    gap: spacing.md,
+  },
+  contactHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
@@ -220,5 +264,34 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     letterSpacing: 0.7,
+  },
+  roles: {
+    marginTop: spacing.xs,
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  hostingButton: {
+    minHeight: 48,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.md,
+    backgroundColor: colors.primarySoft,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  hostingButtonText: {
+    flex: 1,
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  hostingArrow: {
+    color: colors.primary,
+    fontSize: 24,
+  },
+  pressed: {
+    opacity: 0.72,
   },
 });
