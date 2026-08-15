@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { PrimaryButton } from '@/components/primary-button';
 import { ScreenShell } from '@/components/screen-shell';
@@ -63,7 +63,7 @@ export default function HostingListScreen() {
     <ScreenShell
       eyebrow="HOSPEDAGENS"
       title="Acompanhe cada evento"
-      subtitle="Cada hospedagem terá seu próprio chat, checklist e registro de evidências.">
+      subtitle="Cada hospedagem tem seu próprio chat, checklist, fotos e registro de entrega.">
       {loading ? (
         <View style={styles.loading}>
           <ActivityIndicator color={colors.primary} />
@@ -82,7 +82,14 @@ export default function HostingListScreen() {
       ) : (
         <View style={styles.list}>
           {events.map((event) => (
-            <View key={event.id} style={styles.eventCard}>
+            <Pressable
+              key={event.id}
+              accessibilityLabel={`Abrir ${event.title || 'hospedagem'}`}
+              accessibilityRole="button"
+              onPress={() =>
+                router.push({ pathname: '/hosting/[eventId]', params: { eventId: event.id } })
+              }
+              style={({ pressed }) => [styles.eventCard, pressed && styles.eventCardPressed]}>
               <View style={styles.eventHeader}>
                 <Text style={styles.eventTitle}>{event.title || 'Hospedagem'}</Text>
                 <View style={styles.statusPill}>
@@ -90,13 +97,14 @@ export default function HostingListScreen() {
                 </View>
               </View>
               <Text style={styles.period}>{formatPeriod(event.starts_at, event.ends_at)}</Text>
-            </View>
+              <Text style={styles.openHint}>Abrir evento →</Text>
+            </Pressable>
           ))}
         </View>
       )}
 
       <Text style={styles.note}>
-        Próxima etapa: criação do evento, checklist recorrente e chat com registro automático das fotos.
+        O histórico permanece separado por evento, mesmo quando tutor e cuidador fazem várias hospedagens juntos.
       </Text>
     </ScreenShell>
   );
@@ -123,6 +131,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     gap: spacing.sm,
   },
+  eventCardPressed: {
+    backgroundColor: colors.primarySoft,
+    transform: [{ scale: 0.995 }],
+  },
   eventHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -148,6 +160,11 @@ const styles = StyleSheet.create({
   period: {
     color: colors.textMuted,
     fontSize: 13,
+  },
+  openHint: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: '900',
   },
   note: {
     color: colors.textMuted,
