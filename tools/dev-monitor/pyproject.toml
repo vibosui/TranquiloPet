@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tranquilo-pet-dev-monitor"
+version = "0.1.0"
+description = "Monitor local de desenvolvimento do aplicativo Tranquilo Pet."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "email-validator>=2.2,<3",
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.34,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx2>=2.9,<3",
+  "pytest>=8.3,<9",
+]
+
+[project.scripts]
+tranquilo-pet-monitor = "tranquilo_pet_monitor.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+tranquilo_pet_monitor = ["web/*.html", "web/static/*.css", "web/static/*.js"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

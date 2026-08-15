@@ -1,6 +1,6 @@
-# Aplicativo mobile
+# Tranquilo Pet mobile
 
-Aplicativo Expo/React Native do Pet Marketplace.
+Aplicativo Expo SDK 54 do Tranquilo Pet.
 
 ## Executar
 
@@ -10,18 +10,12 @@ Na raiz do repositório:
 npm.cmd run start
 ```
 
-Ou diretamente nesta pasta:
-
-```powershell
-npm.cmd run start
-```
-
-Escaneie o QR Code com o Expo Go. A tela inicial possui um contador simples para validar carregamento, renderização e interação por toque.
+O QR Code aparece no terminal do Metro. Configure `.env.local` com o IPv4 do computador antes de testar o cadastro com o monitor Python.
 
 ## Verificações
 
 ```powershell
 npm.cmd run typecheck
 npm.cmd run lint
+npm.cmd test
 ```
-

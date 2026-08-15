@@ -1,52 +1,106 @@
-import { useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-function getPlatformName() {
-  if (Platform.OS === 'android') return 'Android';
-  if (Platform.OS === 'ios') return 'iOS';
-  return 'Web';
-}
+import { PrimaryButton } from '@/components/primary-button';
+import {
+  checkMonitorConnection,
+  trackUsageInBackground,
+} from '@/features/analytics/usage-tracker';
+import { colors, radii, spacing } from '@/theme/tokens';
+
+type MonitorStatus = 'checking' | 'not_configured' | 'offline' | 'online';
+
+const monitorStatusCopy: Record<MonitorStatus, string> = {
+  checking: 'Verificando monitor local…',
+  not_configured: 'Monitor local não configurado',
+  offline: 'Monitor local desconectado',
+  online: 'Monitor local conectado',
+};
 
 export default function HomeScreen() {
+  const router = useRouter();
   const [interactionCount, setInteractionCount] = useState(0);
+  const [monitorStatus, setMonitorStatus] = useState<MonitorStatus>('checking');
+  const interactionCountRef = useRef(0);
+
+  useEffect(() => {
+    let isMounted = true;
+    trackUsageInBackground({ eventName: 'app_opened', screen: 'home' });
+    void checkMonitorConnection().then((status) => {
+      if (isMounted) setMonitorStatus(status);
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  function handleInteractionTest() {
+    const nextCount = interactionCountRef.current + 1;
+    interactionCountRef.current = nextCount;
+    setInteractionCount(nextCount);
+    trackUsageInBackground({
+      eventName: 'interaction_test_pressed',
+      screen: 'home',
+      metadata: { count: nextCount },
+    });
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.container}>
-        <View style={styles.brandMark} accessibilityElementsHidden>
-          <Text style={styles.brandEmoji}>🐾</Text>
-        </View>
-
-        <Text style={styles.eyebrow}>PET MARKETPLACE</Text>
-        <Text style={styles.title}>O app está funcionando!</Text>
-        <Text style={styles.subtitle}>
-          Esta é nossa primeira tela executando com Expo e React Native.
-        </Text>
-
-        <View style={styles.statusCard}>
-          <View style={styles.statusHeader}>
-            <View style={styles.statusDot} />
-            <Text style={styles.statusTitle}>Ambiente conectado</Text>
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        <View style={styles.container}>
+        <View style={styles.brandRow}>
+          <View style={styles.brandMark} accessibilityElementsHidden>
+            <Text style={styles.brandEmoji}>🐾</Text>
           </View>
-          <Text style={styles.statusText}>Plataforma detectada: {getPlatformName()}</Text>
+          <View>
+            <Text style={styles.brandName}>Tranquilo Pet</Text>
+            <Text style={styles.brandCaption}>Cuidado perto de você</Text>
+          </View>
         </View>
+
+        <View style={styles.hero}>
+          <Text style={styles.eyebrow}>AMBIENTE DE TESTE</Text>
+          <Text style={styles.title}>Seu pet bem cuidado. Você tranquilo.</Text>
+          <Text style={styles.subtitle}>
+            Vamos começar criando um perfil de tutor simples e funcional.
+          </Text>
+        </View>
+
+        <View style={styles.monitorCard}>
+          <View
+            style={[
+              styles.statusDot,
+              monitorStatus === 'online' && styles.statusDotOnline,
+              monitorStatus === 'offline' && styles.statusDotOffline,
+            ]}
+          />
+          <View style={styles.monitorCopy}>
+            <Text style={styles.monitorTitle}>{monitorStatusCopy[monitorStatus]}</Text>
+            <Text style={styles.monitorText}>Eventos também aparecem no terminal do Metro.</Text>
+          </View>
+        </View>
+
+        <PrimaryButton
+          label="Criar perfil de tutor"
+          accessibilityHint="Abre o formulário de cadastro de tutor"
+          onPress={() => router.push('/tutor/register')}
+        />
 
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Testar interação"
-          accessibilityHint="Incrementa o contador de testes"
-          onPress={() => setInteractionCount((currentCount) => currentCount + 1)}
-          style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}>
-          <Text style={styles.buttonText}>Testar interação</Text>
+          accessibilityLabel="Registrar interação de teste"
+          onPress={handleInteractionTest}
+          style={({ pressed }) => [styles.testButton, pressed && styles.testButtonPressed]}>
+          <Text style={styles.testButtonLabel}>Testar interação</Text>
+          <Text accessibilityLiveRegion="polite" style={styles.testCount}>
+            {interactionCount === 0 ? 'Nenhum toque registrado' : `${interactionCount} toque(s)`}
+          </Text>
         </Pressable>
-
-        <Text accessibilityLiveRegion="polite" style={styles.feedback}>
-          {interactionCount === 0
-            ? 'Toque no botão para validar a interação.'
-            : `Interações registradas: ${interactionCount}`}
-        </Text>
-      </View>
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -54,103 +108,131 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#F6FAF7',
+    backgroundColor: colors.background,
+  },
+  scrollContent: {
+    flexGrow: 1,
   },
   container: {
     flex: 1,
-    justifyContent: 'center',
+    width: '100%',
+    maxWidth: 480,
+    alignSelf: 'center',
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.xl,
+  },
+  brandRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 24,
+    gap: spacing.md,
   },
   brandMark: {
-    width: 88,
-    height: 88,
-    marginBottom: 24,
-    borderRadius: 28,
-    backgroundColor: '#DDF3E4',
+    width: 52,
+    height: 52,
+    borderRadius: 18,
+    backgroundColor: colors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
   brandEmoji: {
-    fontSize: 42,
+    fontSize: 26,
+  },
+  brandName: {
+    color: colors.text,
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  brandCaption: {
+    marginTop: 2,
+    color: colors.textMuted,
+    fontSize: 13,
+  },
+  hero: {
+    flex: 1,
+    paddingVertical: spacing.xxl,
+    justifyContent: 'center',
   },
   eyebrow: {
-    marginBottom: 8,
-    color: '#267344',
+    marginBottom: spacing.md,
+    color: colors.primary,
     fontSize: 13,
-    fontWeight: '700',
-    letterSpacing: 1.4,
+    fontWeight: '800',
+    letterSpacing: 1.2,
   },
   title: {
-    color: '#173C28',
-    fontSize: 30,
-    fontWeight: '800',
-    lineHeight: 36,
-    textAlign: 'center',
+    maxWidth: 390,
+    color: colors.text,
+    fontSize: 36,
+    fontWeight: '900',
+    lineHeight: 42,
   },
   subtitle: {
-    maxWidth: 360,
-    marginTop: 12,
-    color: '#53665A',
-    fontSize: 16,
-    lineHeight: 24,
-    textAlign: 'center',
-  },
-  statusCard: {
-    width: '100%',
     maxWidth: 380,
-    marginTop: 32,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: '#D9E7DD',
-    borderRadius: 16,
-    backgroundColor: '#FFFFFF',
+    marginTop: spacing.lg,
+    color: colors.textMuted,
+    fontSize: 17,
+    lineHeight: 25,
   },
-  statusHeader: {
+  monitorCard: {
+    marginBottom: spacing.lg,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    backgroundColor: colors.surface,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
+    gap: spacing.md,
   },
   statusDot: {
     width: 10,
     height: 10,
-    marginRight: 10,
-    borderRadius: 5,
-    backgroundColor: '#2FA866',
+    marginTop: 5,
+    borderRadius: radii.round,
+    backgroundColor: colors.warning,
   },
-  statusTitle: {
-    color: '#173C28',
-    fontSize: 16,
-    fontWeight: '700',
+  statusDotOnline: {
+    backgroundColor: colors.success,
   },
-  statusText: {
-    marginTop: 8,
-    color: '#66766B',
-    fontSize: 14,
+  statusDotOffline: {
+    backgroundColor: colors.error,
   },
-  button: {
-    width: '100%',
-    maxWidth: 380,
-    minHeight: 52,
-    marginTop: 20,
-    borderRadius: 14,
-    backgroundColor: '#267344',
+  monitorCopy: {
+    flex: 1,
+  },
+  monitorTitle: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  monitorText: {
+    marginTop: spacing.xs,
+    color: colors.textMuted,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  testButton: {
+    minHeight: 62,
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    backgroundColor: colors.surface,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
   },
-  buttonPressed: {
-    backgroundColor: '#1D5B35',
-    transform: [{ scale: 0.98 }],
+  testButtonPressed: {
+    backgroundColor: colors.surfaceMuted,
   },
-  buttonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
+  testButtonLabel: {
+    color: colors.primary,
+    fontSize: 15,
+    fontWeight: '800',
   },
-  feedback: {
-    minHeight: 20,
-    marginTop: 14,
-    color: '#66766B',
-    fontSize: 14,
-    textAlign: 'center',
+  testCount: {
+    color: colors.textMuted,
+    fontSize: 13,
   },
 });

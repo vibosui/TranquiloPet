@@ -6,6 +6,8 @@ O PostgreSQL será administrado pelo Supabase. Toda mudança de schema deve exis
 
 O arquivo `supabase/config.toml` será criado pela Supabase CLI. Dados de desenvolvimento reproduzíveis ficarão em `supabase/seed.sql`.
 
+O SQLite do `tools/dev-monitor` não é o banco do produto e não terá migrations de domínio. Ele guarda somente eventos e perfis fictícios do laboratório local em `%LOCALAPPDATA%\TranquiloPet\dev-monitor\monitor.sqlite3`; pode ser apagado quando os testes não forem mais necessários.
+
 ## Conjuntos iniciais de dados
 
 - identidade: `profiles`;
@@ -28,4 +30,3 @@ Essas tabelas são um mapa inicial, não um schema definitivo. Colunas, constrai
 - Mudanças de estado da contratação devem ser validadas e auditadas.
 - Webhooks e criação de pagamentos devem usar chaves de idempotência.
 - O retorno do aplicativo não confirma um pagamento; o backend consulta/recebe o estado oficial do provedor.
-

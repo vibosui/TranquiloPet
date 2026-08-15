@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 
-$requiredCommands = @('git', 'node', 'npm')
+$requiredCommands = @('git', 'node', 'npm', 'python')
 $optionalCommands = @('java', 'adb', 'docker')
 $results = @()
 $missingRequired = @()
@@ -8,6 +8,15 @@ $missingRequired = @()
 foreach ($commandName in $requiredCommands + $optionalCommands) {
   $command = Get-Command $commandName -ErrorAction SilentlyContinue
   $isRequired = $requiredCommands -contains $commandName
+
+  if ($commandName -eq 'python') {
+    $pythonInstallRoot = Join-Path $env:LOCALAPPDATA 'Programs\Python'
+    $pythonExecutable = Get-ChildItem -Path $pythonInstallRoot -Filter 'python.exe' -File -Recurse -ErrorAction SilentlyContinue |
+      Select-Object -First 1
+    if ($null -ne $pythonExecutable) {
+      $command = Get-Command $pythonExecutable.FullName
+    }
+  }
 
   if ($null -eq $command) {
     $results += [PSCustomObject]@{
@@ -30,7 +39,7 @@ foreach ($commandName in $requiredCommands + $optionalCommands) {
     $ErrorActionPreference = $previousErrorActionPreference
     ($javaVersionOutput | Select-Object -First 1) -replace '^.*?version\s+', ''
   } else {
-    & $commandName --version 2>&1 | Select-Object -First 1
+    & $command.Source --version 2>&1 | Select-Object -First 1
   }
 
   $results += [PSCustomObject]@{
@@ -47,4 +56,4 @@ if ($missingRequired.Count -gt 0) {
   exit 1
 }
 
-Write-Output 'Ambiente minimo pronto para criar e executar o app Expo.'
+Write-Output 'Ambiente minimo pronto para executar o app Expo e o monitor local.'

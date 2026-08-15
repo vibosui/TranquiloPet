@@ -5,6 +5,7 @@ node_modules/
 .expo/
 .expo-shared/
 dist/
+build/
 web-build/
 android/
 ios/
@@ -20,6 +21,15 @@ coverage/
 *.log
 .eslintcache
 .turbo/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.runtime/
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
 
 # Local environment and secrets
 .env
@@ -39,4 +49,3 @@ supabase/.env.local
 !.vscode/settings.json
 .DS_Store
 Thumbs.db
-

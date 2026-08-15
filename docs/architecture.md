@@ -1,61 +1,74 @@
 # Arquitetura inicial
 
-## Decisão
+## Decisão do MVP
 
-O MVP será um monorepositório simples contendo:
+O produto será mantido em um monorepositório simples com:
 
-- um aplicativo React Native com Expo e TypeScript;
-- um backend Supabase com PostgreSQL, Auth, Storage e Edge Functions;
-- integração com Mercado Pago isolada em funções server-side.
+- aplicativo React Native com Expo e TypeScript;
+- backend real futuro no Supabase (PostgreSQL, Auth, Storage e Edge Functions);
+- integração com Mercado Pago isolada no backend;
+- monitor Python local descartável para observar os primeiros testes em celulares.
 
-Não haverá backend Node separado ou microsserviços no início. Uma camada adicional só deve ser criada quando houver uma necessidade concreta que as Edge Functions não atendam bem.
+Não haverá microsserviços nem um backend Python de produção. `tools/dev-monitor` existe somente para o laboratório local e será substituído pelo adaptador do Supabase nos fluxos reais.
+
+## Fluxo do laboratório atual
+
+```text
+Expo Go ──HTTP na LAN──> FastAPI ──transação──> SQLite local
+                              ├──> log sanitizado no CMD
+                              └──> SSE ──> painel no navegador
+```
+
+O banco só é confirmado antes de a atualização ser publicada. Eventos não carregam os valores digitados, e os contatos exibidos no painel são mascarados. O dashboard, a documentação da API e os dados de leitura aceitam somente conexões de loopback; os celulares podem acessar apenas saúde e ingestão.
+
+## Organização atual do app
+
+```text
+apps/mobile/src/
+├── app/                         # Rotas do Expo Router
+│   ├── _layout.tsx
+│   ├── index.tsx
+│   └── tutor/register.tsx
+├── components/                  # Controles de UI reutilizáveis
+├── config/                      # Configuração pública de desenvolvimento
+├── features/
+│   ├── analytics/               # Telemetria local best-effort
+│   └── tutors/
+│       ├── api/                 # Adaptador HTTP substituível
+│       └── domain/              # Validação e normalização puras
+└── theme/                       # Tokens visuais
+```
+
+Testes ficam fora de `src/app`, pois qualquer arquivo nessa pasta pode ser interpretado como rota pelo Expo Router.
 
 ## Limites de responsabilidade
 
 ### Aplicativo mobile
 
-- telas, navegação e feedback visual;
-- estado de interface e cache de consultas;
-- validação rápida para experiência do usuário;
-- chamadas autenticadas ao Supabase e às Edge Functions;
-- integração isolada com recursos do aparelho.
+- telas, navegação, feedback e acessibilidade;
+- validação imediata para a experiência do usuário;
+- chamadas aos adaptadores de infraestrutura;
+- telemetria que nunca bloqueia o fluxo principal.
 
-O aplicativo nunca é a autoridade final para autorização, preços, comissões ou pagamentos.
+O aplicativo nunca será autoridade final para autorização, preços, comissões ou pagamentos.
 
-### Banco e backend
+### Backend real
 
-- autorização por recurso usando Row Level Security;
+- autenticação e autorização por recurso com RLS;
 - validações de integridade e transições de estado;
-- cálculo e registro dos valores financeiros;
-- processamento idempotente de webhooks;
-- separação entre dados públicos e privados;
-- auditoria dos estados de solicitações e pagamentos.
+- dados públicos e privados separados;
+- valores financeiros, idempotência e webhooks oficiais.
 
-## Organização planejada do app
+### Monitor local
 
-```text
-apps/mobile/
-├── app/                    # Rotas do Expo Router
-├── src/
-│   ├── components/         # UI reutilizável
-│   ├── domain/             # Regras puras e tipos do domínio
-│   ├── features/           # auth, pets, busca, reservas etc.
-│   ├── infrastructure/     # Supabase e APIs externas
-│   ├── services/           # Casos de uso/orquestração
-│   ├── hooks/
-│   ├── theme/
-│   ├── utils/
-│   └── test/
-└── assets/
-```
-
-Pastas serão adicionadas conforme forem necessárias. Não criaremos arquivos vazios para antecipar funcionalidades ainda inexistentes.
+- recebe somente dados fictícios durante desenvolvimento;
+- persiste em `%LOCALAPPDATA%\TranquiloPet\dev-monitor` fora do OneDrive;
+- usa um único processo Uvicorn e SQLite;
+- não possui autenticação, TLS ou garantias de produção.
 
 ## Ambientes
 
-- `local`: testes automatizados e banco local quando necessário;
-- `staging`: celulares reais, dados fictícios e pagamentos sandbox;
-- `production`: usuários e credenciais reais.
-
-No primeiro teste visual não haverá backend. Em seguida, o app poderá apontar para um projeto Supabase de staging, o que simplifica testes em celulares na mesma etapa em que o schema local é versionado.
+- `local`: Expo Go, testes automatizados e monitor descartável;
+- `staging`: celulares reais, Supabase de teste e pagamentos sandbox;
+- `production`: usuários, TLS, autenticação e credenciais reais.
 

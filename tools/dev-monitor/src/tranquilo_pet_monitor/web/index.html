@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Tranquilo Pet — Monitor local</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script src="/static/app.js" defer></script>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="Tranquilo Pet Monitor">
+          <span class="brand-mark" aria-hidden="true">🐾</span>
+          <span>
+            <strong>Tranquilo Pet</strong>
+            <small>Monitor local</small>
+          </span>
+        </a>
+        <div class="live-status" id="live-status" data-state="connecting">
+          <span class="live-dot" aria-hidden="true"></span>
+          <span id="live-label">Conectando…</span>
+        </div>
+      </header>
+
+      <main>
+        <section class="hero">
+          <div>
+            <span class="eyebrow">AMBIENTE DE DESENVOLVIMENTO</span>
+            <h1>Acompanhe os testes em tempo real.</h1>
+            <p>Eventos dos celulares e cadastros locais, sem misturar este monitor ao backend real.</p>
+          </div>
+          <button class="refresh-button" id="refresh-button" type="button">Atualizar agora</button>
+        </section>
+
+        <section class="metrics" aria-label="Resumo de uso">
+          <article class="metric-card accent-green">
+            <span class="metric-icon" aria-hidden="true">●</span>
+            <span class="metric-label">Sessões ativas</span>
+            <strong id="metric-active-sessions">—</strong>
+            <small>últimos 5 minutos</small>
+          </article>
+          <article class="metric-card accent-blue">
+            <span class="metric-icon" aria-hidden="true">↗</span>
+            <span class="metric-label">Eventos hoje</span>
+            <strong id="metric-events-today">—</strong>
+            <small>interações recebidas</small>
+          </article>
+          <article class="metric-card accent-amber">
+            <span class="metric-icon" aria-hidden="true">♙</span>
+            <span class="metric-label">Perfis de tutor</span>
+            <strong id="metric-tutor-profiles">—</strong>
+            <small>armazenados localmente</small>
+          </article>
+          <article class="metric-card accent-purple">
+            <span class="metric-icon" aria-hidden="true">✓</span>
+            <span class="metric-label">Sucessos no app</span>
+            <strong id="metric-successful-registrations">—</strong>
+            <small>eventos de sucesso</small>
+          </article>
+        </section>
+
+        <section class="content-grid">
+          <article class="panel activity-panel">
+            <div class="panel-heading">
+              <div>
+                <span class="panel-kicker">AO VIVO</span>
+                <h2>Atividade recente</h2>
+              </div>
+              <span class="panel-count" id="event-count">0 eventos</span>
+            </div>
+            <div class="activity-list" id="activity-list" aria-live="polite">
+              <div class="empty-state">Aguardando a primeira interação do aplicativo.</div>
+            </div>
+          </article>
+
+          <article class="panel guidance-panel">
+            <div class="panel-heading">
+              <div>
+                <span class="panel-kicker">CONEXÃO LOCAL</span>
+                <h2>Como acompanhar</h2>
+              </div>
+            </div>
+            <ol class="steps">
+              <li><span>1</span><p>Mantenha este monitor aberto no computador.</p></li>
+              <li><span>2</span><p>Abra o Tranquilo Pet em um ou mais celulares.</p></li>
+              <li><span>3</span><p>Toques e cadastros aparecem aqui e no terminal.</p></li>
+            </ol>
+            <div class="privacy-card">
+              <strong>Privacidade de teste</strong>
+              <p>Eventos não incluem os valores digitados. Contatos aparecem mascarados.</p>
+            </div>
+          </article>
+        </section>
+
+        <section class="panel tutors-panel">
+          <div class="panel-heading">
+            <div>
+              <span class="panel-kicker">PERFIS LOCAIS</span>
+              <h2>Tutores cadastrados</h2>
+            </div>
+            <span class="panel-count" id="tutor-count">0 perfis</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Nome</th>
+                  <th>Contato protegido</th>
+                  <th>Localização</th>
+                  <th>Cadastrado em</th>
+                </tr>
+              </thead>
+              <tbody id="tutors-table">
+                <tr><td colspan="4" class="table-empty">Nenhum perfil cadastrado.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+
+      <footer>
+        <span>Tranquilo Pet Dev Monitor</span>
+        <span>Somente para rede local e dados fictícios</span>
+      </footer>
+    </div>
+  </body>
+</html>

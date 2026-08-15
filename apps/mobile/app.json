@@ -1,16 +1,18 @@
 {
   "expo": {
-    "name": "Pet",
-    "slug": "pet-marketplace",
+    "name": "Tranquilo Pet",
+    "slug": "tranquilo-pet",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "pet",
+    "scheme": "tranquilopet",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.vibosui.tranquilopet"
     },
     "android": {
+      "package": "com.vibosui.tranquilopet",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -28,7 +30,7 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#226B45",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }

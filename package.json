@@ -1,19 +1,29 @@
 {
-  "name": "pet-marketplace",
+  "name": "tranquilo-pet",
   "version": "0.0.0",
   "private": true,
   "description": "Marketplace mobile que conecta tutores de pets a cuidadores.",
   "scripts": {
-    "start": "npm run start --workspace=mobile",
-    "android": "npm run android --workspace=mobile",
-    "web": "npm run web --workspace=mobile",
-    "lint": "npm run lint --workspace=mobile",
-    "typecheck": "npm run typecheck --workspace=mobile"
+    "start": "npm run start --workspace=@tranquilo-pet/mobile",
+    "android": "npm run android --workspace=@tranquilo-pet/mobile",
+    "web": "npm run web --workspace=@tranquilo-pet/mobile",
+    "monitor": "powershell -ExecutionPolicy Bypass -File .\\scripts\\start-dev-monitor.ps1",
+    "lint": "npm run lint --workspace=@tranquilo-pet/mobile",
+    "typecheck": "npm run typecheck --workspace=@tranquilo-pet/mobile",
+    "test": "npm run test --workspace=@tranquilo-pet/mobile"
   },
   "workspaces": [
     "apps/*"
   ],
+  "overrides": {
+    "react": "19.1.0",
+    "test-renderer": "1.1.0"
+  },
   "engines": {
-    "node": ">=22.11.0"
+    "node": ">=24.0.0"
+  },
+  "devDependencies": {
+    "react": "19.1.0",
+    "test-renderer": "1.1.0"
   }
 }
