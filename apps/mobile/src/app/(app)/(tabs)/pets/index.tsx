@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
 import { PrimaryButton } from '@/components/primary-button';
@@ -78,7 +78,14 @@ export default function MyPetsScreen() {
       ) : (
         <View style={styles.list}>
           {pets.map((pet) => (
-            <View key={pet.id} style={styles.petCard}>
+            <Pressable
+              key={pet.id}
+              accessibilityLabel={`Abrir dossiê de ${pet.name}`}
+              accessibilityRole="button"
+              onPress={() =>
+                router.push({ pathname: '/pets/[petId]', params: { petId: pet.id } })
+              }
+              style={({ pressed }) => [styles.petCard, pressed && styles.petCardPressed]}>
               <View style={styles.petIcon}>
                 <Text style={styles.petEmoji}>{pet.species === 'cat' ? '🐱' : pet.species === 'dog' ? '🐶' : '🐾'}</Text>
               </View>
@@ -92,8 +99,9 @@ export default function MyPetsScreen() {
                 {pet.identification_notes ? (
                   <Text numberOfLines={2} style={styles.petNotes}>{pet.identification_notes}</Text>
                 ) : null}
+                <Text style={styles.openHint}>Abrir dossiê →</Text>
               </View>
-            </View>
+            </Pressable>
           ))}
           <PrimaryButton label="Cadastrar outro pet" onPress={() => router.push('/pets/new')} />
         </View>
@@ -123,6 +131,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     flexDirection: 'row',
     gap: spacing.md,
+  },
+  petCardPressed: {
+    backgroundColor: colors.primarySoft,
+    transform: [{ scale: 0.995 }],
   },
   petIcon: {
     width: 52,
@@ -154,5 +166,11 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 13,
     lineHeight: 18,
+  },
+  openHint: {
+    marginTop: spacing.sm,
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: '900',
   },
 });
