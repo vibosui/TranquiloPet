@@ -20,16 +20,20 @@ export default function ProfileOverviewScreen() {
   if (!user || !profile) return null;
 
   async function toggleRole(role: 'tutor' | 'caregiver') {
-    if (savingRole) return;
+    if (savingRole || !profile || !user) return;
+
+    const currentProfile = profile;
+    const userId = user.id;
     setSavingRole(role);
     clearError();
 
     const column = role === 'tutor' ? 'tutor_enabled' : 'caregiver_enabled';
-    const currentValue = role === 'tutor' ? profile.tutor_enabled : profile.caregiver_enabled;
+    const currentValue =
+      role === 'tutor' ? currentProfile.tutor_enabled : currentProfile.caregiver_enabled;
     const { error: updateError } = await supabase
       .from('profiles')
       .update({ [column]: !currentValue })
-      .eq('id', user.id);
+      .eq('id', userId);
 
     if (updateError) {
       Alert.alert('Não foi possível atualizar', 'Tente novamente em alguns instantes.');
