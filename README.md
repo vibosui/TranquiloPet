@@ -1,100 +1,195 @@
-# Tranquilo Pet
+# Hospeda Patas
 
-MVP mobile para conectar tutores de pets a cuidadores. O fluxo atual é um laboratório offline com login de demonstração, perfis e pets, preparado para Expo Go SDK 54 e para acompanhamento opcional no computador.
+Aplicativo mobile para organizar hospedagens de pets com transparência entre tutor e cuidador. O produto centraliza o dossiê do pet, a preparação da entrega, checklist do cuidado, evidências fotográficas e conversa de cada hospedagem.
 
-## O que já funciona
+> **Cuidado que acolhe. Confiança que fica.**
 
-- aplicativo Expo SDK 54 com a identidade **Tranquilo Pet**;
-- acesso local por conta de demonstração, sem armazenar senha ou token;
-- uma identidade de usuário que pode ativar os papéis de tutor e cuidador;
-- cadastro, consulta e edição dos perfis de tutor e cuidador;
-- área **Meus pets**, cadastro/edição, cuidados especiais e análise comportamental;
-- foto principal e até cinco fotos adicionais, escolhidas somente da galeria e copiadas para o armazenamento persistente do app no Android/iOS;
-- autocomplete offline de 27 UFs e 5.571 municípios do IBGE;
-- 10 usuários, 5 tutores, 5 cuidadores e 20 pets fictícios semeados localmente;
-- monitor Python local com FastAPI e SQLite;
-- eventos sanitizados no CMD e painel web atualizado ao vivo;
-- testes automatizados mobile e Python.
+## Fundação atual
 
-O login e o banco do aplicativo são implementações locais de desenvolvimento em AsyncStorage. O monitor continua sendo apenas uma ferramenta opcional de telemetria. O backend real será Supabase; não use dados reais, nem trate esta autenticação local como segurança de produção.
+A branch `agent/hospeda-patas-foundation` substitui o antigo laboratório offline por uma arquitetura compartilhada entre aparelhos:
+
+- Expo / React Native com Expo Router;
+- identidade visual caramelo do **Hospeda Patas**;
+- Supabase Auth para contas reais;
+- PostgreSQL + Row Level Security como fonte de verdade;
+- código permanente por usuário no formato `HP-XXXXXX`;
+- conexão entre usuários por código, com estrutura pronta para solicitação/aceite e aceite automático no MVP;
+- usuário podendo atuar como tutor, cuidador ou ambos;
+- dossiê persistente **Conheça meu Pet**;
+- hospedagens separadas por evento;
+- snapshot do dossiê no momento da criação da hospedagem;
+- registro de entrega específico de cada evento;
+- checklist com tarefas únicas, horários específicos ou intervalos recorrentes;
+- tarefas que podem exigir foto antes da conclusão;
+- fotos de entrega e evidências em buckets privados do Supabase Storage;
+- chat e registros automáticos vinculados a cada hospedagem;
+- máquina de estados da hospedagem validada no banco;
+- tabelas de Realtime e notificações preparadas para sincronização entre aparelhos;
+- GitHub Actions executando TypeScript, ESLint e Jest.
+
+Os dados funcionais **não usam mais AsyncStorage como banco do produto**. O armazenamento local é utilizado apenas para persistir a sessão de autenticação do Supabase.
+
+## Identidade visual
+
+A cor principal é o caramelo `#9E3F0A`. O laranja é apenas acento.
+
+```text
+#3A1500  espresso / títulos e contraste profundo
+#6A2600  cocoa / apoio
+#7E2D00  caramelo escuro / estados pressionados
+#9E3F0A  caramelo principal / marca e ações primárias
+#FF7325  acento quente / destaques pontuais
+#000000  preto
+#FFFFFF  branco / superfícies
+```
+
+## Modelo de produto
+
+### Identidade e contatos
+
+Cada usuário recebe um código permanente `HP-XXXXXX`. Ao informar o código de outra pessoa, é criada uma conexão. A tabela já suporta `pending`, `accepted`, `rejected` e `blocked`; durante a validação inicial, a conexão é aceita automaticamente.
+
+### Dossiê do pet
+
+O dossiê reúne dados que tendem a permanecer válidos entre hospedagens:
+
+1. identificação;
+2. comportamento e personalidade;
+3. alimentação;
+4. água;
+5. passeios;
+6. rotina;
+7. brinquedos e objetos de apego;
+8. saúde;
+9. medicamentos;
+10. contatos e autorização de emergência;
+11. observações adicionais.
+
+Quando uma hospedagem é criada, o estado atual do dossiê é copiado para um snapshot do evento. Alterações posteriores no perfil do pet não reescrevem o histórico de uma hospedagem passada.
+
+### Preparação da hospedagem
+
+Itens enviados, estado do pet no momento da entrega e fotos pré-hospedagem pertencem ao evento, não ao dossiê permanente. O tutor registra, por pet:
+
+- itens e quantidades enviados;
+- data/horário do registro;
+- estado do pet na entrega;
+- observações;
+- foto do rosto;
+- foto do corpo inteiro;
+- laterais, característica específica e acessórios quando necessário.
+
+Rosto e corpo inteiro são obrigatórios no fluxo atual para marcar a entrega como preparada. O cuidador não consegue iniciar a hospedagem enquanto todos os pets do evento não estiverem preparados.
+
+### Checklist e evidências
+
+O tutor pode criar tarefas de refeição, água, passeio, medicamento, foto, rotina ou uma tarefa personalizada. Cada tarefa pode ser gerada para:
+
+- um único horário;
+- vários horários específicos;
+- um intervalo fixo entre duas datas/horários.
+
+Quando `requires_photo=true`, o cuidador precisa registrar uma foto antes de concluir a tarefa. A conclusão também cria um registro na linha do tempo/chat da hospedagem.
+
+### Estados
+
+```text
+draft → sent → accepted → in_progress → completed
+   └────────────── cancelamento permitido conforme o participante/estado
+```
+
+As transições são validadas por funções do banco; o cliente não altera o estado diretamente.
+
+## Backend
+
+O MVP está conectado a um projeto Supabase em `sa-east-1`.
+
+As variáveis públicas ficam em `apps/mobile/.env.example`. A chave `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY` é apropriada para o cliente; a segurança dos dados depende das políticas RLS e das funções controladas no banco. Nunca coloque uma `service_role`/secret key no aplicativo.
+
+Buckets privados atuais:
+
+```text
+avatars
+pet-media
+event-media       # fotos da preparação/entrega
+event-evidence    # fotos exigidas pelo checklist
+```
 
 ## Estrutura
 
 ```text
 .
-├── apps/mobile/              # Aplicativo Expo/React Native
-├── tools/dev-monitor/        # API e painel local de testes
-├── docs/                     # Arquitetura, banco e preparação local
-├── scripts/                  # Comandos auxiliares do Windows
-├── supabase/                 # Futuras migrations e funções do backend
-└── package.json              # Workspace npm
+├── apps/mobile/              # aplicativo Expo / React Native
+├── tools/dev-monitor/        # ferramenta local de telemetria; não é backend do produto
+├── docs/
+├── scripts/
+├── supabase/                 # migrations/artefatos versionados do backend
+└── .github/workflows/        # CI mobile
 ```
 
-## Preparar o projeto
+## Instalar
 
-Requer Node.js 24+, Python 3.12+ e Expo Go com suporte ao SDK 54.
+Requer Node.js 24+ e Expo Go compatível com SDK 54.
+
+Na raiz:
 
 ```powershell
 npm.cmd install
 ```
 
-O Python é necessário somente para acompanhar eventos no painel. Para prepará-lo uma vez:
+## Executar pela internet
+
+Para testar em celulares que não estão na mesma rede do computador:
 
 ```powershell
-cd tools\dev-monitor
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-cd ..\..
+npm.cmd run start:tunnel
 ```
 
-Copie `apps/mobile/.env.example` para `apps/mobile/.env.local` e troque `IP_DO_COMPUTADOR` pelo IPv4 da rede Wi-Fi. Nesta máquina, o endereço usado no teste é `192.168.1.6`.
+O Expo inicia o Metro com tunnel e exibe um QR Code `exp://...exp.direct`. Abra pelo Expo Go. O computador precisa permanecer ligado e com o processo do Expo em execução.
 
-## Abrir em celulares
+O Supabase é remoto; portanto, tutor e cuidador podem usar redes diferentes e compartilhar os mesmos dados.
 
-O app funciona sem monitor:
+## Roteiro de teste em dois aparelhos
+
+1. Crie uma conta **A** e mantenha o papel de Tutor ativo.
+2. Crie uma conta **B** e ative o papel de Cuidador em **Perfil**.
+3. Na conta B, copie o código `HP-XXXXXX`.
+4. Na conta A, abra **Contatos** e adicione B pelo código.
+5. Em A, cadastre um pet e abra seu dossiê.
+6. Em A, abra o contato B e escolha **Criar hospedagem com este cuidador**.
+7. Selecione pet, período e crie o rascunho.
+8. Faça o registro de entrega, incluindo rosto e corpo inteiro.
+9. Volte à hospedagem e monte o checklist.
+10. Envie a hospedagem ao cuidador.
+11. Em B, abra **Hospedagens**, entre no evento e aceite.
+12. B inicia a hospedagem após o registro de entrega estar preparado.
+13. B conclui tarefas; tarefas com foto abrem a câmera e exigem evidência.
+14. Use o chat do evento nos dois aparelhos.
+15. Com todas as tarefas concluídas, B encerra a hospedagem.
+
+## Notificações
+
+A camada de banco já possui `notifications` e cria registros para mensagens, fotos, tarefas concluídas e alterações de estado. As tabelas centrais também estão na publicação do Supabase Realtime.
+
+Próximas etapas:
+
+- inscrição Realtime no cliente para atualizar chat/checklist sem refresh manual;
+- central de chats por contato quando houver mais de uma hospedagem;
+- persistência do último evento selecionado;
+- registro do Expo Push Token;
+- Supabase Edge Function para push remoto;
+- development build do Expo para validar push remoto no Android.
+
+## Validação automática
 
 ```powershell
-npm.cmd run start
-```
-
-O QR Code aparece nesse terminal; ele não é salvo como arquivo. Leia-o pelo Expo Go. No login, selecione qualquer conta de `demo01@tranquilopet.local` a `demo10@tranquilopet.local`.
-
-Os dados são independentes em cada aparelho e permanecem no armazenamento local do Expo Go. No Android e iOS, fotos escolhidas são copiadas para o diretório persistente do app; ainda não há upload ou sincronização entre aparelhos.
-
-## Acompanhar interações no computador
-
-No primeiro terminal, inicie o monitor. As interações recebidas serão impressas neste CMD sem nome, e-mail ou telefone:
-
-```powershell
-npm.cmd run monitor
-```
-
-Abra o painel somente no computador em `http://127.0.0.1:8000`.
-
-No segundo terminal, inicie o Expo caso ainda não esteja aberto:
-
-```powershell
-npm.cmd run start
-```
-
-Computador e celulares devem estar na mesma rede. Antes de abrir o app, você pode confirmar no navegador do celular:
-
-```text
-http://192.168.1.6:8000/api/health
-```
-
-O CMD e o painel mostram login, consultas e salvamentos sem receber nome, e-mail, telefone, CPF, observações ou fotos.
-
-## Verificações
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\check-environment.ps1
 npm.cmd run typecheck
 npm.cmd run lint
 npm.cmd test
-cd tools\dev-monitor
-.\.venv\Scripts\python.exe -m pytest
 ```
 
-Consulte [docs/local-setup.md](docs/local-setup.md) para a preparação completa e o roteiro de teste em dois aparelhos.
+O workflow `.github/workflows/mobile-ci.yml` executa os mesmos passos em Node 24 a cada push para `main` e branches `agent/**`.
+
+## Monitor local
+
+`tools/dev-monitor` continua disponível apenas como ferramenta auxiliar de desenvolvimento. Ele não é necessário para o funcionamento do app, não deve ser exposto como backend do produto e pode permanecer acessível somente no computador local.
