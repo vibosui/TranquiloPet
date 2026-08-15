@@ -41,7 +41,7 @@
         "expo-image-picker",
         {
           "photosPermission": "Permita que o Hospeda Patas acesse as fotos escolhidas para perfis, pets e evidências da hospedagem.",
-          "cameraPermission": false,
+          "cameraPermission": "Permita que o Hospeda Patas use a câmera para registrar as evidências solicitadas durante a hospedagem.",
           "microphonePermission": false
         }
       ]
