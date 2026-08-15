@@ -2,39 +2,28 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
-import { AppDataProvider, useAppData } from '@/core/state/app-data-context';
+import { AuthProvider, useAuth } from '@/core/auth/auth-context';
 import { colors, spacing } from '@/theme/tokens';
 
 function RootNavigator() {
-  const { currentUser, demoDataAvailable, error, loading } = useAppData();
+  const { loading, user } = useAuth();
 
   if (loading) {
     return (
       <View accessibilityLiveRegion="polite" style={styles.loading}>
         <ActivityIndicator color={colors.primary} size="large" />
-        <Text style={styles.loadingText}>Preparando o ambiente de demonstração...</Text>
-      </View>
-    );
-  }
-
-  if (!demoDataAvailable) {
-    return (
-      <View accessibilityLiveRegion="polite" accessibilityRole="alert" style={styles.loading}>
-        <Text style={styles.unavailableTitle}>Dados demo indisponíveis</Text>
-        <Text style={styles.loadingText}>{error}</Text>
-        <Text style={styles.loadingText}>
-          Este build não habilitou o laboratório local. Nenhum dado foi lido ou criado.
-        </Text>
+        <Text style={styles.brand}>Hospeda Patas</Text>
+        <Text style={styles.loadingText}>Preparando seu espaço de cuidado...</Text>
       </View>
     );
   }
 
   return (
     <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Protected guard={!currentUser}>
+      <Stack.Protected guard={!user}>
         <Stack.Screen name="(auth)" />
       </Stack.Protected>
-      <Stack.Protected guard={Boolean(currentUser)}>
+      <Stack.Protected guard={Boolean(user)}>
         <Stack.Screen name="(app)" />
       </Stack.Protected>
     </Stack>
@@ -43,10 +32,10 @@ function RootNavigator() {
 
 export default function RootLayout() {
   return (
-    <AppDataProvider>
+    <AuthProvider>
       <RootNavigator />
       <StatusBar style="dark" />
-    </AppDataProvider>
+    </AuthProvider>
   );
 }
 
@@ -57,19 +46,18 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.lg,
+    gap: spacing.md,
+  },
+  brand: {
+    color: colors.primary,
+    fontSize: 28,
+    fontWeight: '900',
   },
   loadingText: {
     maxWidth: 360,
     color: colors.textMuted,
     fontSize: 15,
     lineHeight: 22,
-    textAlign: 'center',
-  },
-  unavailableTitle: {
-    color: colors.text,
-    fontSize: 22,
-    fontWeight: '700',
     textAlign: 'center',
   },
 });
