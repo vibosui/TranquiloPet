@@ -1,49 +1,51 @@
 import { useRouter } from 'expo-router';
-import { useEffect } from 'react';
+import { useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { InfoRow } from '@/components/info-row';
-import { PetCard } from '@/components/pet-card';
+import { ErrorBanner } from '@/components/error-banner';
 import { PrimaryButton } from '@/components/primary-button';
-import { ProfileAvatar } from '@/components/profile-avatar';
 import { ScreenShell } from '@/components/screen-shell';
 import { SecondaryButton } from '@/components/secondary-button';
 import { SectionCard } from '@/components/section-card';
-import { useAppData } from '@/core/state/app-data-context';
-import { trackUsageInBackground } from '@/features/analytics/usage-tracker';
-import { labelForOption, petSpeciesOptions } from '@/features/pets/domain/pet-options';
+import { useAuth } from '@/core/auth/auth-context';
+import { supabase } from '@/core/supabase/client';
 import { formatBrazilianPhone } from '@/features/shared/domain/brazilian-formatters';
 import { colors, radii, spacing } from '@/theme/tokens';
 
 export default function ProfileOverviewScreen() {
   const router = useRouter();
-  const {
-    currentUser,
-    getCaregiverProfileByUserId,
-    getTutorProfileByUserId,
-    listPetsByOwner,
-    signOut,
-  } = useAppData();
+  const { clearError, error, profile, refreshProfile, signOut, user } = useAuth();
+  const [savingRole, setSavingRole] = useState<'tutor' | 'caregiver' | null>(null);
 
-  useEffect(() => {
-    trackUsageInBackground({ eventName: 'profile_viewed', screen: 'profile' });
-  }, []);
+  if (!user || !profile) return null;
 
-  if (!currentUser) return null;
-  const tutor = getTutorProfileByUserId(currentUser.id);
-  const caregiver = getCaregiverProfileByUserId(currentUser.id);
-  const pets = listPetsByOwner(currentUser.id);
+  async function toggleRole(role: 'tutor' | 'caregiver') {
+    if (savingRole) return;
+    setSavingRole(role);
+    clearError();
+
+    const column = role === 'tutor' ? 'tutor_enabled' : 'caregiver_enabled';
+    const currentValue = role === 'tutor' ? profile.tutor_enabled : profile.caregiver_enabled;
+    const { error: updateError } = await supabase
+      .from('profiles')
+      .update({ [column]: !currentValue })
+      .eq('id', user.id);
+
+    if (updateError) {
+      Alert.alert('Não foi possível atualizar', 'Tente novamente em alguns instantes.');
+    } else {
+      await refreshProfile();
+    }
+    setSavingRole(null);
+  }
 
   function confirmSignOut() {
-    Alert.alert('Sair da conta de teste?', 'Os dados locais continuarão salvos neste aparelho.', [
+    Alert.alert('Sair da conta?', 'Você poderá entrar novamente usando seu e-mail e senha.', [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Sair',
         style: 'destructive',
-        onPress: () => {
-          trackUsageInBackground({ eventName: 'demo_logout', screen: 'profile' });
-          void signOut();
-        },
+        onPress: () => void signOut(),
       },
     ]);
   }
@@ -51,92 +53,116 @@ export default function ProfileOverviewScreen() {
   return (
     <ScreenShell
       eyebrow="MINHA CONTA"
-      title="Informações do perfil"
-      subtitle="Esta é a identidade única usada nos papéis de tutor e cuidador.">
+      title="Sua identidade Hospeda Patas"
+      subtitle="O mesmo usuário pode atuar como tutor, cuidador ou nos dois papéis. Seu código permanece o mesmo.">
+      {error ? <ErrorBanner message={error} /> : null}
+
       <View style={styles.profileHeader}>
-        <ProfileAvatar name={currentUser.fullName} uri={currentUser.photos.profileUri} />
+        <View style={styles.avatar}>
+          <Text style={styles.avatarText}>{profile.full_name.slice(0, 1).toUpperCase() || 'H'}</Text>
+        </View>
         <View style={styles.profileCopy}>
-          <Text style={styles.profileName}>{currentUser.fullName}</Text>
-          <Text style={styles.profileEmail}>{currentUser.email}</Text>
-          <View style={styles.demoBadge}>
-            <Text style={styles.demoBadgeText}>CONTA LOCAL</Text>
+          <Text style={styles.profileName}>{profile.full_name || 'Usuário Hospeda Patas'}</Text>
+          <Text style={styles.profileEmail}>{user.email}</Text>
+          <View style={styles.cloudBadge}>
+            <Text style={styles.cloudBadgeText}>CONTA SINCRONIZADA</Text>
           </View>
         </View>
       </View>
 
-      <SectionCard title="Dados da conta">
-        <InfoRow label="Nome" value={currentUser.fullName} />
-        <InfoRow label="E-mail" value={currentUser.email} />
-        <InfoRow label="Telefone" last value={formatBrazilianPhone(currentUser.phone)} />
+      <SectionCard
+        title="Código de identificação"
+        description="Compartilhe apenas quando quiser criar um contato. O código é permanente e o QR Code usará exatamente esta identificação.">
+        <View style={styles.codeCard}>
+          <View>
+            <Text style={styles.codeLabel}>SEU CÓDIGO</Text>
+            <Text selectable style={styles.codeValue}>{profile.public_code}</Text>
+          </View>
+          <View style={styles.qrPlaceholder} accessibilityLabel="QR Code será disponibilizado nesta área">
+            <Text style={styles.qrGlyph}>▦</Text>
+          </View>
+        </View>
+        <PrimaryButton label="Adicionar alguém pelo código" onPress={() => router.push('/contacts')} />
       </SectionCard>
 
-      <SectionCard title="Perfis" description="Ative um ou os dois papéis com a mesma conta.">
+      <SectionCard
+        title="Como você usa o Hospeda Patas?"
+        description="Durante o MVP você pode ativar os papéis diretamente. Os formulários detalhados de tutor e cuidador serão ligados a estes estados.">
         <RoleCard
           title="Tutor"
-          active={Boolean(tutor)}
-          detail={tutor ? `${tutor.location.cityName} - ${tutor.location.stateCode}` : 'Não cadastrado'}
-          onPress={() => router.push(tutor ? '/profile/tutor' : '/tutor/edit')}
+          description="Cria o dossiê do pet, prepara a hospedagem e acompanha checklist e fotos."
+          active={profile.tutor_enabled}
+          loading={savingRole === 'tutor'}
+          onPress={() => void toggleRole('tutor')}
         />
         <RoleCard
           title="Cuidador"
-          active={Boolean(caregiver)}
-          detail={caregiver ? `${caregiver.experienceYears} ano(s) de experiência` : 'Não cadastrado'}
-          onPress={() => router.push(caregiver ? '/profile/caregiver' : '/caregiver/edit')}
+          description="Recebe a hospedagem, executa tarefas e registra evidências do cuidado."
+          active={profile.caregiver_enabled}
+          loading={savingRole === 'caregiver'}
+          onPress={() => void toggleRole('caregiver')}
+        />
+      </SectionCard>
+
+      <SectionCard title="Dados da conta">
+        <ProfileRow label="Nome" value={profile.full_name || 'Não informado'} />
+        <ProfileRow label="E-mail" value={user.email || 'Não informado'} />
+        <ProfileRow
+          label="Telefone"
+          value={profile.phone ? formatBrazilianPhone(profile.phone) : 'Não informado'}
+          last
         />
       </SectionCard>
 
       <SectionCard
-        title="Meus pets"
-        description={`${pets.length} registro(s)`}
-        action={
-          <Pressable accessibilityRole="button" onPress={() => router.navigate('/pets/index')}>
-            <Text style={styles.link}>Ver todos</Text>
-          </Pressable>
-        }>
-        {pets.slice(0, 2).map((pet) => (
-          <PetCard
-            key={pet.id}
-            name={pet.name}
-            species={labelForOption(petSpeciesOptions, pet.species)}
-            breed={pet.breed}
-            photoUri={pet.photos.profileUri}
-            onPress={() =>
-              router.push({ pathname: '/pets/[petId]', params: { petId: pet.id } })
-            }
-          />
-        ))}
-        <PrimaryButton label="Cadastrar pet" onPress={() => router.push('/pets/new')} />
-      </SectionCard>
+        title="Privacidade por padrão"
+        description="Fotos de pets e evidências são armazenadas em buckets privados. O acesso funcional será limitado aos participantes de cada hospedagem por políticas do Supabase." />
 
-      <SecondaryButton destructive label="Sair da conta de teste" onPress={confirmSignOut} />
+      <SecondaryButton destructive label="Sair da conta" onPress={confirmSignOut} />
     </ScreenShell>
+  );
+}
+
+function ProfileRow({ label, value, last = false }: { label: string; value: string; last?: boolean }) {
+  return (
+    <View style={[styles.profileRow, last && styles.profileRowLast]}>
+      <Text style={styles.profileRowLabel}>{label}</Text>
+      <Text selectable style={styles.profileRowValue}>{value}</Text>
+    </View>
   );
 }
 
 function RoleCard({
   title,
+  description,
   active,
-  detail,
+  loading,
   onPress,
 }: {
   title: string;
+  description: string;
   active: boolean;
-  detail: string;
+  loading: boolean;
   onPress: () => void;
 }) {
   return (
     <Pressable
-      accessibilityLabel={`${title}. ${active ? 'Ativo' : 'Inativo'}. ${detail}`}
+      accessibilityLabel={`${title}. ${active ? 'Ativo' : 'Inativo'}`}
       accessibilityRole="button"
+      disabled={loading}
       onPress={onPress}
-      style={({ pressed }) => [styles.roleCard, pressed && styles.rolePressed]}>
+      style={({ pressed }) => [
+        styles.roleCard,
+        active && styles.roleCardActive,
+        pressed && styles.roleCardPressed,
+      ]}>
       <View style={styles.roleCopy}>
         <Text style={styles.roleTitle}>{title}</Text>
-        <Text style={styles.roleDetail}>{detail}</Text>
+        <Text style={styles.roleDescription}>{description}</Text>
       </View>
-      <View style={[styles.statusBadge, active ? styles.activeBadge : styles.inactiveBadge]}>
-        <Text style={[styles.statusText, active ? styles.activeText : styles.inactiveText]}>
-          {active ? 'Ativo' : 'Cadastrar'}
+      <View style={[styles.roleStatus, active && styles.roleStatusActive]}>
+        <Text style={[styles.roleStatusText, active && styles.roleStatusTextActive]}>
+          {loading ? '...' : active ? 'Ativo' : 'Ativar'}
         </Text>
       </View>
     </Pressable>
@@ -145,19 +171,32 @@ function RoleCard({
 
 const styles = StyleSheet.create({
   profileHeader: {
-    padding: spacing.lg,
-    borderRadius: radii.lg,
+    padding: spacing.xl,
+    borderRadius: radii.xl,
     backgroundColor: colors.primary,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.lg,
+  },
+  avatar: {
+    width: 64,
+    height: 64,
+    borderRadius: radii.round,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: {
+    color: colors.primary,
+    fontSize: 26,
+    fontWeight: '900',
   },
   profileCopy: {
     flex: 1,
   },
   profileName: {
     color: colors.surface,
-    fontSize: 21,
+    fontSize: 20,
     fontWeight: '900',
   },
   profileEmail: {
@@ -165,7 +204,7 @@ const styles = StyleSheet.create({
     color: colors.primarySoft,
     fontSize: 13,
   },
-  demoBadge: {
+  cloudBadge: {
     alignSelf: 'flex-start',
     marginTop: spacing.sm,
     paddingHorizontal: spacing.sm,
@@ -173,13 +212,50 @@ const styles = StyleSheet.create({
     borderRadius: radii.round,
     backgroundColor: colors.surface,
   },
-  demoBadgeText: {
+  cloudBadgeText: {
     color: colors.primary,
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  codeCard: {
+    padding: spacing.lg,
+    borderRadius: radii.lg,
+    backgroundColor: colors.accentSoft,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  codeLabel: {
+    color: colors.textMuted,
     fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 1.2,
+  },
+  codeValue: {
+    marginTop: spacing.xs,
+    color: colors.primary,
+    fontSize: 25,
+    fontWeight: '900',
+    letterSpacing: 1.6,
+  },
+  qrPlaceholder: {
+    width: 52,
+    height: 52,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  qrGlyph: {
+    color: colors.primary,
+    fontSize: 30,
     fontWeight: '900',
   },
   roleCard: {
-    minHeight: 72,
     padding: spacing.md,
     borderWidth: 1,
     borderColor: colors.border,
@@ -189,49 +265,61 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.md,
   },
-  rolePressed: {
+  roleCardActive: {
+    borderColor: colors.primary,
     backgroundColor: colors.primarySoft,
+  },
+  roleCardPressed: {
+    opacity: 0.75,
   },
   roleCopy: {
     flex: 1,
   },
   roleTitle: {
     color: colors.text,
-    fontSize: 16,
-    fontWeight: '800',
+    fontSize: 15,
+    fontWeight: '900',
   },
-  roleDetail: {
+  roleDescription: {
     marginTop: spacing.xs,
     color: colors.textMuted,
-    fontSize: 13,
+    fontSize: 12,
+    lineHeight: 17,
   },
-  statusBadge: {
+  roleStatus: {
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
     borderRadius: radii.round,
+    backgroundColor: colors.surfaceMuted,
   },
-  activeBadge: {
-    backgroundColor: colors.successSoft,
+  roleStatusActive: {
+    backgroundColor: colors.primary,
   },
-  inactiveBadge: {
-    backgroundColor: colors.warningSoft,
+  roleStatusText: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: '900',
   },
-  statusText: {
+  roleStatusTextActive: {
+    color: colors.surface,
+  },
+  profileRow: {
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    gap: spacing.xs,
+  },
+  profileRowLast: {
+    borderBottomWidth: 0,
+  },
+  profileRowLabel: {
+    color: colors.textMuted,
     fontSize: 11,
     fontWeight: '800',
   },
-  activeText: {
-    color: colors.success,
-  },
-  inactiveText: {
-    color: colors.warning,
-  },
-  link: {
-    minHeight: 44,
-    paddingHorizontal: spacing.sm,
-    color: colors.primary,
-    fontSize: 13,
-    fontWeight: '800',
-    textAlignVertical: 'center',
+  profileRowValue: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '700',
   },
 });
