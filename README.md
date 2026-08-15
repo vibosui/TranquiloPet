@@ -122,13 +122,21 @@ ngrok http 8000
 EXPO_PUBLIC_MONITOR_API_URL=https://exemplo.ngrok.app
 ```
 
-4. Reinicie o Expo para que a variável seja recarregada:
+4. Reinicie o monitor depois de atualizar esta branch e valide o endpoint público abrindo:
+
+```text
+https://exemplo.ngrok.app/api/health
+```
+
+A resposta esperada é JSON com `"status":"ok"`. A URL raiz `https://exemplo.ngrok.app/` continua retornando 403 de propósito: o painel web e os endpoints de dashboard permanecem restritos ao próprio computador.
+
+5. Reinicie o Expo para que a variável seja recarregada:
 
 ```powershell
 npm.cmd run start:tunnel
 ```
 
-5. O painel continua local no computador em `http://127.0.0.1:8000`; o endpoint público serve apenas para o aplicativo enviar eventos ao FastAPI.
+6. Abra o painel normalmente no computador em `http://127.0.0.1:8000`. Pelo ngrok ficam públicos somente `/api/health` e `/api/events`, necessários para o aplicativo remoto testar a conexão e enviar telemetria.
 
 As requisições do monitor enviam o header `ngrok-skip-browser-warning`, permitindo o uso do endpoint de desenvolvimento do ngrok sem receber a página intermediária no lugar da resposta JSON.
 
