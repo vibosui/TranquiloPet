@@ -15,6 +15,7 @@ MVP mobile para conectar tutores de pets a cuidadores. O fluxo atual é um labor
 - monitor Python local com FastAPI e SQLite;
 - eventos sanitizados no CMD e painel web atualizado ao vivo;
 - suporte a Expo Tunnel para testar o app fora da rede local;
+- suporte a URL HTTPS do ngrok para enviar telemetria ao monitor fora da LAN;
 - testes automatizados mobile e Python.
 
 O login e o banco do aplicativo são implementações locais de desenvolvimento em AsyncStorage. O monitor continua sendo apenas uma ferramenta opcional de telemetria. O backend real será Supabase; não use dados reais, nem trate esta autenticação local como segurança de produção.
@@ -79,29 +80,61 @@ npm.cmd run start:tunnel
 
 O Expo inicia com `expo start --tunnel` e mostra um QR Code acessível pelo Expo Go através da internet. Nesse modo o celular não precisa estar conectado ao mesmo Wi-Fi do computador.
 
-O app continua funcionando porque os dados atuais são locais em AsyncStorage. O monitor FastAPI é opcional e permanece local; portanto, a telemetria do monitor pode ficar indisponível em um celular fora da sua rede sem impedir login, perfis, pets ou os demais fluxos locais do MVP.
-
-Não use o tunnel como backend de produção. Quando o Supabase entrar no projeto, ele será o endpoint remoto compartilhado entre os aparelhos.
+O app continua funcionando porque os dados atuais são locais em AsyncStorage. O tunnel do Expo publica somente o Metro; ele não publica automaticamente o monitor FastAPI da porta 8000.
 
 ## Acompanhar interações no computador pela LAN
 
-No primeiro terminal, inicie o monitor. As interações recebidas serão impressas neste CMD sem nome, e-mail ou telefone:
+No primeiro terminal, inicie o monitor:
 
 ```powershell
 npm.cmd run monitor
 ```
 
-Abra o painel somente no computador em `http://127.0.0.1:8000`.
+Abra o painel no computador em `http://127.0.0.1:8000`.
 
-No segundo terminal, inicie o Expo caso ainda não esteja aberto:
+No segundo terminal, inicie o Expo:
 
 ```powershell
 npm.cmd run start
 ```
 
-Computador e celulares devem estar na mesma rede para o monitor local. Antes de abrir o app, você pode confirmar no navegador do celular usando `http://IP_DO_COMPUTADOR:8000/api/health`.
+Computador e celulares devem estar na mesma rede. Antes de abrir o app, confirme no navegador do celular usando `http://IP_DO_COMPUTADOR:8000/api/health`.
+
+## Acompanhar interações usando ngrok
+
+Este modo publica a API do monitor separadamente do tunnel do Expo. Ele é útil quando o celular está fora da LAN ou quando a rede bloqueia acesso direto à porta 8000.
+
+1. Inicie o monitor FastAPI:
+
+```powershell
+npm.cmd run monitor
+```
+
+2. Em outro terminal, usando o ngrok CLI oficial já autenticado, publique a porta 8000:
+
+```powershell
+ngrok http 8000
+```
+
+3. Copie a URL HTTPS exibida pelo ngrok, por exemplo `https://exemplo.ngrok.app`, e coloque em `apps/mobile/.env.local`:
+
+```text
+EXPO_PUBLIC_MONITOR_API_URL=https://exemplo.ngrok.app
+```
+
+4. Reinicie o Expo para que a variável seja recarregada:
+
+```powershell
+npm.cmd run start:tunnel
+```
+
+5. O painel continua local no computador em `http://127.0.0.1:8000`; o endpoint público serve apenas para o aplicativo enviar eventos ao FastAPI.
+
+As requisições do monitor enviam o header `ngrok-skip-browser-warning`, permitindo o uso do endpoint de desenvolvimento do ngrok sem receber a página intermediária no lugar da resposta JSON.
 
 O CMD e o painel mostram login, consultas e salvamentos sem receber nome, e-mail, telefone, CPF, observações ou fotos.
+
+Não use ngrok ou o monitor como backend de produção. Quando o Supabase entrar no projeto, ele será o endpoint remoto compartilhado entre os aparelhos.
 
 ## Verificações
 
