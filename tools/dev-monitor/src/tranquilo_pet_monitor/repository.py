@@ -8,18 +8,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
-from .schemas import TutorProfileCreate, UsageEventCreate
-
-
-class DuplicateTutorEmailError(Exception):
-    """Raised when an e-mail already belongs to a local tutor profile."""
+from .schemas import UsageEventCreate
 
 
 @dataclass(frozen=True, slots=True)
 class CreatedRecord:
-    id: int | str
+    id: int
     created_at: datetime
 
 
@@ -47,35 +42,7 @@ class SQLiteMonitorRepository:
                 CREATE INDEX IF NOT EXISTS idx_events_session_id
                     ON events(session_id);
 
-                CREATE TABLE IF NOT EXISTS tutor_profiles (
-                    id TEXT PRIMARY KEY,
-                    session_id TEXT NOT NULL,
-                    submission_id TEXT NOT NULL,
-                    full_name TEXT NOT NULL,
-                    email TEXT NOT NULL COLLATE NOCASE UNIQUE,
-                    phone TEXT NOT NULL,
-                    city TEXT NOT NULL,
-                    state TEXT NOT NULL,
-                    created_at TEXT NOT NULL
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_tutor_profiles_created_at
-                    ON tutor_profiles(created_at DESC);
                 """
-            )
-            columns = {
-                row["name"]
-                for row in connection.execute("PRAGMA table_info(tutor_profiles)").fetchall()
-            }
-            if "submission_id" not in columns:
-                connection.execute("ALTER TABLE tutor_profiles ADD COLUMN submission_id TEXT")
-                connection.execute(
-                    "UPDATE tutor_profiles SET submission_id = 'legacy-' || id "
-                    "WHERE submission_id IS NULL"
-                )
-            connection.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_tutor_profiles_submission_id "
-                "ON tutor_profiles(submission_id)"
             )
 
     def insert_event(self, event: UsageEventCreate) -> CreatedRecord:
@@ -98,48 +65,6 @@ class SQLiteMonitorRepository:
             )
             return CreatedRecord(id=int(cursor.lastrowid), created_at=received_at)
 
-    def insert_tutor(self, profile: TutorProfileCreate) -> CreatedRecord:
-        profile_id = str(uuid4())
-        created_at = datetime.now(UTC)
-        try:
-            with self._connect() as connection:
-                connection.execute(
-                    """
-                    INSERT INTO tutor_profiles (
-                        id, session_id, submission_id, full_name, email, phone, city, state,
-                        created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        profile_id,
-                        profile.session_id,
-                        profile.submission_id,
-                        profile.full_name,
-                        str(profile.email),
-                        profile.phone,
-                        profile.city,
-                        profile.state,
-                        created_at.isoformat(),
-                    ),
-                )
-        except sqlite3.IntegrityError as error:
-            error_message = str(error).lower()
-            if "submission_id" in error_message:
-                with self._connect() as connection:
-                    existing = connection.execute(
-                        "SELECT id, created_at FROM tutor_profiles WHERE submission_id = ?",
-                        (profile.submission_id,),
-                    ).fetchone()
-                if existing is not None:
-                    return CreatedRecord(
-                        id=existing["id"],
-                        created_at=datetime.fromisoformat(existing["created_at"]),
-                    )
-            if "email" in error_message:
-                raise DuplicateTutorEmailError from error
-            raise
-        return CreatedRecord(id=profile_id, created_at=created_at)
-
     def dashboard_metrics(self) -> dict[str, int]:
         now = datetime.now(UTC)
         local_now = datetime.now().astimezone()
@@ -156,12 +81,20 @@ class SQLiteMonitorRepository:
                     (SELECT COUNT(DISTINCT session_id) FROM events WHERE received_at >= ?)
                         AS active_sessions,
                     (SELECT COUNT(*) FROM events WHERE received_at >= ?) AS events_today,
-                    (SELECT COUNT(*) FROM tutor_profiles) AS tutor_profiles,
                     (SELECT COUNT(*) FROM events
-                        WHERE event_name = 'tutor_registration_succeeded')
-                        AS successful_registrations
+                        WHERE received_at >= ?
+                        AND event_name IN (
+                            'tutor_profile_saved',
+                            'caregiver_profile_saved',
+                            'pet_profile_saved'
+                        ))
+                        AS profile_saves,
+                    (SELECT COUNT(*) FROM events
+                        WHERE received_at >= ?
+                        AND event_name = 'demo_account_registered')
+                        AS accounts_created
                 """,
-                (active_since, start_of_day),
+                (active_since, start_of_day, start_of_day, start_of_day),
             ).fetchone()
         return dict(row)
 
@@ -183,19 +116,6 @@ class SQLiteMonitorRepository:
             }
             for row in rows
         ]
-
-    def recent_tutors(self, limit: int = 50) -> list[dict[str, Any]]:
-        with self._connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT id, full_name, email, phone, city, state, created_at
-                FROM tutor_profiles
-                ORDER BY created_at DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
-        return [dict(row) for row in rows]
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:

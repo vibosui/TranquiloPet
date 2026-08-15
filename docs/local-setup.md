@@ -61,12 +61,16 @@ Painel no computador: `http://127.0.0.1:8000`. O QR Code fica no Terminal 2 enqu
 
 1. Abra `http://192.168.1.6:8000/api/health` no navegador de cada celular.
 2. Leia o mesmo QR Code com o Expo Go nos dois aparelhos.
-3. Toque em **Testar interação** e confirme duas sessões no painel.
-4. Envie o formulário vazio e confirme os cinco erros e o foco no primeiro campo.
-5. Cadastre um perfil fictício válido e confirme sucesso no app, no CMD e no painel.
-6. Desligue o Wi-Fi, tente outro cadastro e confirme a mensagem de conexão sem perder os campos.
-7. Religue o Wi-Fi e tente novamente; a chave de submissão evita criar o mesmo perfil duas vezes se a primeira resposta tiver se perdido.
-8. Feche e reabra o painel para confirmar que o SQLite preservou os dados.
+3. Em cada aparelho, selecione usuários diferentes no login e confirme sessões independentes.
+4. Abra o perfil do usuário 05 e confira os papéis de tutor e cuidador e seus dois pets.
+5. No tutor, abra o seletor de UF, escolha a UF e confirme que a cidade só é habilitada depois.
+6. Cadastre ou edite um cuidador usando CPF fictício, serviços, espécies, portes e disponibilidade.
+7. Cadastre um pet, marque **Precisa de medicação** e confirme o campo obrigatório de detalhes.
+8. Marque comportamentos, salve e confira a tela de verificação do pet.
+9. Escolha uma foto principal e fotos adicionais; confirme que o seletor nativo abre diretamente, sem pedido prévio de acesso amplo à galeria.
+10. Desligue o Wi-Fi e confirme que login, perfis e pets continuam funcionando localmente.
+11. Com o monitor ligado, confirme no CMD/painel os eventos sanitizados, sem os valores dos formulários.
+12. Feche e reabra o app para confirmar a restauração da sessão, dos dados e das fotos copiadas para o armazenamento persistente do app.
 
 ## Emulador e builds Android locais
 

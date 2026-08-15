@@ -4,14 +4,11 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Request, status
 from fastapi.responses import StreamingResponse
 
-from .repository import DuplicateTutorEmailError
 from .schemas import (
     DashboardSnapshot,
-    TutorProfileCreate,
-    TutorProfileCreated,
     UsageEventCreate,
     UsageEventCreated,
 )
@@ -36,21 +33,6 @@ def health() -> dict[str, str]:
 )
 def create_event(payload: UsageEventCreate, request: Request) -> UsageEventCreated:
     return _service(request).record_event(payload)
-
-
-@router.post(
-    "/api/tutors",
-    response_model=TutorProfileCreated,
-    status_code=status.HTTP_201_CREATED,
-)
-def create_tutor(payload: TutorProfileCreate, request: Request) -> TutorProfileCreated:
-    try:
-        return _service(request).create_tutor(payload)
-    except DuplicateTutorEmailError as error:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Já existe um perfil local com este e-mail.",
-        ) from error
 
 
 @router.get("/api/dashboard/snapshot", response_model=DashboardSnapshot)

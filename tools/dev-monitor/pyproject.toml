@@ -9,14 +9,13 @@ description = "Monitor local de desenvolvimento do aplicativo Tranquilo Pet."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "email-validator>=2.2,<3",
   "fastapi>=0.115,<1",
   "uvicorn[standard]>=0.34,<1",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "httpx2>=2.9,<3",
+  "httpx>=0.28,<1",
   "pytest>=8.3,<9",
 ]
 

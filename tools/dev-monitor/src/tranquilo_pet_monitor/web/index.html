@@ -29,7 +29,7 @@
           <div>
             <span class="eyebrow">AMBIENTE DE DESENVOLVIMENTO</span>
             <h1>Acompanhe os testes em tempo real.</h1>
-            <p>Eventos dos celulares e cadastros locais, sem misturar este monitor ao backend real.</p>
+            <p>Eventos sanitizados dos celulares, sem misturar este monitor ao backend real.</p>
           </div>
           <button class="refresh-button" id="refresh-button" type="button">Atualizar agora</button>
         </section>
@@ -49,15 +49,15 @@
           </article>
           <article class="metric-card accent-amber">
             <span class="metric-icon" aria-hidden="true">♙</span>
-            <span class="metric-label">Perfis de tutor</span>
-            <strong id="metric-tutor-profiles">—</strong>
-            <small>armazenados localmente</small>
+            <span class="metric-label">Perfis salvos</span>
+            <strong id="metric-profile-saves">—</strong>
+            <small>tutor, cuidador e pet hoje</small>
           </article>
           <article class="metric-card accent-purple">
             <span class="metric-icon" aria-hidden="true">✓</span>
-            <span class="metric-label">Sucessos no app</span>
-            <strong id="metric-successful-registrations">—</strong>
-            <small>eventos de sucesso</small>
+            <span class="metric-label">Contas criadas</span>
+            <strong id="metric-accounts-created">—</strong>
+            <small>cadastros locais hoje</small>
           </article>
         </section>
 
@@ -89,34 +89,9 @@
             </ol>
             <div class="privacy-card">
               <strong>Privacidade de teste</strong>
-              <p>Eventos não incluem os valores digitados. Contatos aparecem mascarados.</p>
+              <p>O painel recebe apenas nomes de eventos e metadados permitidos, nunca os valores digitados.</p>
             </div>
           </article>
-        </section>
-
-        <section class="panel tutors-panel">
-          <div class="panel-heading">
-            <div>
-              <span class="panel-kicker">PERFIS LOCAIS</span>
-              <h2>Tutores cadastrados</h2>
-            </div>
-            <span class="panel-count" id="tutor-count">0 perfis</span>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Nome</th>
-                  <th>Contato protegido</th>
-                  <th>Localização</th>
-                  <th>Cadastrado em</th>
-                </tr>
-              </thead>
-              <tbody id="tutors-table">
-                <tr><td colspan="4" class="table-empty">Nenhum perfil cadastrado.</td></tr>
-              </tbody>
-            </table>
-          </div>
         </section>
       </main>
 

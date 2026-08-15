@@ -11,11 +11,27 @@ export type UsageEventName =
   | 'tutor_registration_submit_started'
   | 'tutor_registration_validation_failed'
   | 'tutor_registration_submit_failed'
-  | 'tutor_registration_succeeded';
+  | 'tutor_registration_succeeded'
+  | 'demo_login_succeeded'
+  | 'demo_account_registered'
+  | 'demo_logout'
+  | 'profile_viewed'
+  | 'tutor_profile_saved'
+  | 'caregiver_profile_saved'
+  | 'pet_profile_viewed'
+  | 'pet_profile_saved';
 
 export type UsageEvent = {
   eventName: UsageEventName;
-  screen: 'home' | 'tutor_registration';
+  screen:
+    | 'home'
+    | 'login'
+    | 'account_registration'
+    | 'profile'
+    | 'tutor_profile'
+    | 'caregiver_profile'
+    | 'pet_profile'
+    | 'pet_form';
   metadata?: Record<string, MetadataValue>;
 };
 

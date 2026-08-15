@@ -11,15 +11,19 @@ O produto será mantido em um monorepositório simples com:
 
 Não haverá microsserviços nem um backend Python de produção. `tools/dev-monitor` existe somente para o laboratório local e será substituído pelo adaptador do Supabase nos fluxos reais.
 
-## Fluxo do laboratório atual
+## Fluxos do laboratório atual
 
 ```text
-Expo Go ──HTTP na LAN──> FastAPI ──transação──> SQLite local
-                              ├──> log sanitizado no CMD
-                              └──> SSE ──> painel no navegador
+Expo Go ──AsyncStorage──> banco local versionado por aparelho
+   │
+   └──telemetria opcional na LAN──> FastAPI ──> SQLite do monitor
+                                          ├──> log sanitizado no CMD
+                                          └──> SSE ──> painel no navegador
 ```
 
-O banco só é confirmado antes de a atualização ser publicada. Eventos não carregam os valores digitados, e os contatos exibidos no painel são mascarados. O dashboard, a documentação da API e os dados de leitura aceitam somente conexões de loopback; os celulares podem acessar apenas saúde e ingestão.
+Cadastros e sessão não dependem do monitor. Eventos não carregam valores digitados. O dashboard, a documentação da API e os dados de leitura aceitam somente loopback; os celulares podem acessar apenas saúde e ingestão.
+
+O banco local é deliberadamente limitado ao desenvolvimento: não possui autenticação real, compartilhamento entre aparelhos nem upload de fotos. No Android e iOS, o adaptador de mídia copia as imagens escolhidas para o diretório persistente do app antes de salvar suas URIs. Interfaces de repositório preservam a futura troca por Supabase.
 
 ## Organização atual do app
 
@@ -27,15 +31,21 @@ O banco só é confirmado antes de a atualização ser publicada. Eventos não c
 apps/mobile/src/
 ├── app/                         # Rotas do Expo Router
 │   ├── _layout.tsx
-│   ├── index.tsx
-│   └── tutor/register.tsx
+│   ├── (auth)/                  # Login e criação de conta local
+│   └── (app)/                   # Rotas protegidas, tabs, perfis e pets
 ├── components/                  # Controles de UI reutilizáveis
+├── core/
+│   ├── domain/                  # User, papéis, pets e contratos
+│   ├── data/                    # AsyncStorage e dados-semente
+│   └── state/                   # Sessão e autorização local
 ├── config/                      # Configuração pública de desenvolvimento
 ├── features/
 │   ├── analytics/               # Telemetria local best-effort
-│   └── tutors/
-│       ├── api/                 # Adaptador HTTP substituível
-│       └── domain/              # Validação e normalização puras
+│   ├── caregivers/              # Formulário e opções do cuidador
+│   ├── locations/               # Snapshot oficial IBGE e autocomplete
+│   ├── media/                   # Persistência local de fotos escolhidas
+│   ├── pets/                    # Cadastro e análise comportamental
+│   └── tutors/                  # Perfil de tutor
 └── theme/                       # Tokens visuais
 ```
 
@@ -49,6 +59,10 @@ Testes ficam fora de `src/app`, pois qualquer arquivo nessa pasta pode ser inter
 - validação imediata para a experiência do usuário;
 - chamadas aos adaptadores de infraestrutura;
 - telemetria que nunca bloqueia o fluxo principal.
+
+O mesmo `User` referencia `TutorProfile`, `CaregiverProfile` e pets. A existência dos perfis determina os papéis; não há contas duplicadas por papel.
+
+Recursos mantidos desligados nesta fase: câmera, upload remoto, GPS preciso, notificações, tarefas em segundo plano, pagamento e autenticação de produção.
 
 O aplicativo nunca será autoridade final para autorização, preços, comissões ou pagamentos.
 
@@ -71,4 +85,3 @@ O aplicativo nunca será autoridade final para autorização, preços, comissõe
 - `local`: Expo Go, testes automatizados e monitor descartável;
 - `staging`: celulares reais, Supabase de teste e pagamentos sandbox;
 - `production`: usuários, TLS, autenticação e credenciais reais.
-

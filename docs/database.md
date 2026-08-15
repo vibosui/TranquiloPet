@@ -6,7 +6,16 @@ O PostgreSQL será administrado pelo Supabase. Toda mudança de schema deve exis
 
 O arquivo `supabase/config.toml` será criado pela Supabase CLI. Dados de desenvolvimento reproduzíveis ficarão em `supabase/seed.sql`.
 
-O SQLite do `tools/dev-monitor` não é o banco do produto e não terá migrations de domínio. Ele guarda somente eventos e perfis fictícios do laboratório local em `%LOCALAPPDATA%\TranquiloPet\dev-monitor\monitor.sqlite3`; pode ser apagado quando os testes não forem mais necessários.
+O SQLite do `tools/dev-monitor` não é o banco do produto e não terá migrations de domínio. Ele guarda somente telemetria e registros legados do laboratório em `%LOCALAPPDATA%\TranquiloPet\dev-monitor\monitor.sqlite3`.
+
+O app usa temporariamente duas chaves locais:
+
+- `@tranquilo-pet/dev/database/v1`: usuários, perfis e pets fictícios;
+- `@tranquilo-pet/dev/session/v1`: apenas modo, ID do usuário e data de entrada.
+
+Senha, token e credenciais não são persistidos. AsyncStorage não é criptografado nem compartilhado entre aparelhos; essa camada existe somente para testar UX offline. No Android/iOS, as imagens ficam no diretório persistente do app e o JSON guarda somente suas URIs. O adaptador futuro trocará os contratos por Supabase Auth, PostgreSQL e Storage.
+
+Seed idempotente atual: 10 usuários, 5 perfis de tutor, 5 de cuidador e 20 pets (dois por usuário). O usuário 05 exerce ambos os papéis.
 
 ## Conjuntos iniciais de dados
 

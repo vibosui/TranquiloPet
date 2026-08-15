@@ -6,6 +6,14 @@ const eventLabels = {
   tutor_registration_validation_failed: 'Validação do cadastro falhou',
   tutor_registration_submit_failed: 'Envio do cadastro falhou',
   tutor_registration_succeeded: 'Cadastro de tutor concluído',
+  demo_login_succeeded: 'Login de demonstração concluído',
+  demo_account_registered: 'Conta local criada',
+  demo_logout: 'Sessão local encerrada',
+  profile_viewed: 'Perfil consultado',
+  tutor_profile_saved: 'Perfil de tutor salvo',
+  caregiver_profile_saved: 'Perfil de cuidador salvo',
+  pet_profile_viewed: 'Perfil de pet consultado',
+  pet_profile_saved: 'Perfil de pet salvo',
 };
 
 const elements = {
@@ -14,12 +22,10 @@ const elements = {
   refreshButton: document.querySelector('#refresh-button'),
   activeSessions: document.querySelector('#metric-active-sessions'),
   eventsToday: document.querySelector('#metric-events-today'),
-  tutorProfiles: document.querySelector('#metric-tutor-profiles'),
-  successfulRegistrations: document.querySelector('#metric-successful-registrations'),
+  profileSaves: document.querySelector('#metric-profile-saves'),
+  accountsCreated: document.querySelector('#metric-accounts-created'),
   eventCount: document.querySelector('#event-count'),
-  tutorCount: document.querySelector('#tutor-count'),
   activityList: document.querySelector('#activity-list'),
-  tutorsTable: document.querySelector('#tutors-table'),
 };
 
 let refreshTimer;
@@ -27,13 +33,6 @@ let refreshTimer;
 function setConnectionState(state, label) {
   elements.liveStatus.dataset.state = state;
   elements.liveLabel.textContent = label;
-}
-
-function formatDateTime(value) {
-  return new Intl.DateTimeFormat('pt-BR', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  }).format(new Date(value));
 }
 
 function formatTime(value) {
@@ -53,8 +52,8 @@ function platformInitial(platform) {
 function renderMetrics(metrics) {
   elements.activeSessions.textContent = metrics.active_sessions;
   elements.eventsToday.textContent = metrics.events_today;
-  elements.tutorProfiles.textContent = metrics.tutor_profiles;
-  elements.successfulRegistrations.textContent = metrics.successful_registrations;
+  elements.profileSaves.textContent = metrics.profile_saves;
+  elements.accountsCreated.textContent = metrics.accounts_created;
 }
 
 function renderEvents(events) {
@@ -95,46 +94,6 @@ function renderEvents(events) {
   }
 }
 
-function renderTutors(tutors) {
-  elements.tutorCount.textContent = tutors.length === 1 ? '1 perfil' : `${tutors.length} perfis`;
-  elements.tutorsTable.replaceChildren();
-
-  if (tutors.length === 0) {
-    const row = document.createElement('tr');
-    const cell = document.createElement('td');
-    cell.colSpan = 4;
-    cell.className = 'table-empty';
-    cell.textContent = 'Nenhum perfil cadastrado.';
-    row.append(cell);
-    elements.tutorsTable.append(row);
-    return;
-  }
-
-  for (const tutor of tutors) {
-    const row = document.createElement('tr');
-
-    const name = document.createElement('td');
-    const nameStrong = document.createElement('strong');
-    nameStrong.textContent = tutor.full_name;
-    name.append(nameStrong);
-
-    const contact = document.createElement('td');
-    contact.textContent = tutor.masked_email;
-    const phone = document.createElement('small');
-    phone.textContent = tutor.masked_phone;
-    contact.append(phone);
-
-    const location = document.createElement('td');
-    location.textContent = `${tutor.city} — ${tutor.state}`;
-
-    const createdAt = document.createElement('td');
-    createdAt.textContent = formatDateTime(tutor.created_at);
-
-    row.append(name, contact, location, createdAt);
-    elements.tutorsTable.append(row);
-  }
-}
-
 async function refreshDashboard() {
   elements.refreshButton.disabled = true;
   try {
@@ -143,7 +102,6 @@ async function refreshDashboard() {
     const snapshot = await response.json();
     renderMetrics(snapshot.metrics);
     renderEvents(snapshot.events);
-    renderTutors(snapshot.tutors);
   } catch (error) {
     console.error('Falha ao atualizar o painel', error);
     setConnectionState('offline', 'Painel indisponível');

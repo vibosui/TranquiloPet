@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sqlite3
 
 from fastapi.testclient import TestClient
 
@@ -19,9 +20,10 @@ def test_health_and_empty_dashboard(client):
     assert dashboard.json()["metrics"] == {
         "active_sessions": 0,
         "events_today": 0,
-        "tutor_profiles": 0,
-        "successful_registrations": 0,
+        "profile_saves": 0,
+        "accounts_created": 0,
     }
+    assert "tutors" not in dashboard.json()
 
 
 def test_event_is_persisted_counted_and_logged_without_metadata(client, caplog):
@@ -46,38 +48,30 @@ def test_event_is_persisted_counted_and_logged_without_metadata(client, caplog):
     assert '"count": 2' not in caplog.text
 
 
-def test_tutor_profile_is_persisted_masked_and_unique(client, caplog):
-    caplog.set_level(logging.INFO, logger="tranquilo_pet_monitor.activity")
-    payload = {
-        "session_id": "android-session-1",
-        "submission_id": "tutor-submission-1",
-        "full_name": "Ana Souza",
-        "email": "ANA@EMAIL.COM",
-        "phone": "(47) 99999-1234",
-        "city": "Rio do Sul",
-        "state": "sc",
-    }
-
-    created = client.post("/api/tutors", json=payload)
-    repeated_submission = client.post("/api/tutors", json=payload)
-    duplicate_email = client.post(
-        "/api/tutors",
-        json={**payload, "submission_id": "tutor-submission-2"},
+def test_new_profile_events_are_accepted_and_counted_without_profile_data(client):
+    events = (
+        ("tutor_profile_saved", "tutor_profile"),
+        ("caregiver_profile_saved", "caregiver_profile"),
+        ("pet_profile_saved", "pet_form"),
+        ("demo_account_registered", "account_registration"),
     )
-
-    assert created.status_code == 201
-    assert repeated_submission.status_code == 201
-    assert repeated_submission.json()["id"] == created.json()["id"]
-    assert duplicate_email.status_code == 409
+    for event_name, screen in events:
+        response = client.post(
+            "/api/events",
+            json={
+                "session_id": "android-session-1",
+                "event_name": event_name,
+                "screen": screen,
+                "platform": "android",
+                "metadata": {"action": "create"},
+            },
+        )
+        assert response.status_code == 201
 
     snapshot = client.get("/api/dashboard/snapshot").json()
-    assert snapshot["metrics"]["tutor_profiles"] == 1
-    tutor = snapshot["tutors"][0]
-    assert tutor["full_name"] == "Ana Souza"
-    assert tutor["masked_email"] == "an*******@email.com"
-    assert tutor["masked_phone"] == "(**) *****-1234"
-    assert "ana@email.com" not in caplog.text.lower()
-    assert "47999991234" not in caplog.text
+    assert snapshot["metrics"]["profile_saves"] == 3
+    assert snapshot["metrics"]["accounts_created"] == 1
+    assert "tutors" not in snapshot
 
 
 def test_rejects_invalid_or_oversized_payload(client):
@@ -100,21 +94,52 @@ def test_rejects_invalid_or_oversized_payload(client):
     assert oversized.status_code == 413
 
 
-def test_rejects_values_that_are_too_short_after_normalization(client):
-    response = client.post(
-        "/api/tutors",
-        json={
-            "session_id": "android-session-1",
-            "submission_id": "tutor-invalid-fields",
-            "full_name": "  A  ",
-            "email": "ana@email.com",
-            "phone": "(47) 99999-1234",
-            "city": "  X  ",
-            "state": " sc ",
-        },
-    )
+def test_legacy_tutor_endpoint_and_contact_table_are_not_exposed(client):
+    payload = {
+        "session_id": "android-session-1",
+        "submission_id": "tutor-submission-1",
+        "full_name": "Ana Souza",
+        "email": "ana@example.test",
+        "phone": "47999991234",
+        "city": "Rio do Sul",
+        "state": "SC",
+    }
 
-    assert response.status_code == 422
+    assert client.post("/api/tutors", json=payload).status_code == 404
+    assert "/api/tutors" not in client.get("/openapi.json").json()["paths"]
+
+    html = client.get("/").text
+    javascript = client.get("/static/app.js").text
+    assert "tutors-table" not in html
+    assert "Contato protegido" not in html
+    assert "renderTutors" not in javascript
+
+
+def test_existing_legacy_tutor_table_is_preserved_but_inaccessible(tmp_path):
+    database_path = tmp_path / "legacy.sqlite3"
+    with sqlite3.connect(database_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE tutor_profiles (
+                id TEXT PRIMARY KEY,
+                full_name TEXT NOT NULL,
+                email TEXT NOT NULL,
+                phone TEXT NOT NULL
+            );
+            INSERT INTO tutor_profiles (id, full_name, email, phone)
+            VALUES ('legacy-1', 'Legacy Test', 'legacy@example.test', '47999991234');
+            """
+        )
+
+    settings = Settings(database_path=database_path)
+    with TestClient(create_app(settings)) as local_client:
+        assert local_client.post("/api/tutors", json={}).status_code == 404
+        snapshot = local_client.get("/api/dashboard/snapshot").json()
+        assert "tutors" not in snapshot
+
+    with sqlite3.connect(database_path) as connection:
+        count = connection.execute("SELECT COUNT(*) FROM tutor_profiles").fetchone()[0]
+    assert count == 1
 
 
 def test_sqlite_file_is_released_after_each_request(tmp_path):

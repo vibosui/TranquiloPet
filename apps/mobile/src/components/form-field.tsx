@@ -12,25 +12,42 @@ import { colors, radii, spacing } from '@/theme/tokens';
 type FormFieldProps = TextInputProps & {
   label: string;
   error?: string;
+  hint?: string;
+  required?: boolean;
 };
 
 export const FormField = forwardRef<TextInput, FormFieldProps>(
-  ({ label, error, style, ...inputProps }, ref) => {
+  (
+    {
+      label,
+      error,
+      hint,
+      required = false,
+      style,
+      accessibilityLabel,
+      ...inputProps
+    },
+    ref,
+  ) => {
     const generatedId = useId().replace(/:/g, '');
     const errorId = `field-error-${generatedId}`;
 
     return (
       <View style={styles.container}>
-        <Text style={styles.label}>{label}</Text>
+        <Text style={styles.label}>
+          {label}
+          {required ? <Text style={styles.required}> *</Text> : null}
+        </Text>
         <TextInput
           ref={ref}
-          accessibilityLabel={label}
+          accessibilityLabel={accessibilityLabel ?? `${label}${required ? ', obrigatório' : ''}`}
           aria-describedby={error ? errorId : undefined}
           aria-invalid={Boolean(error)}
           placeholderTextColor={colors.textMuted}
-          style={[styles.input, error && styles.inputError, style]}
+          style={[styles.input, inputProps.multiline && styles.inputMultiline, error && styles.inputError, style]}
           {...inputProps}
         />
+        {hint && !error ? <Text style={styles.hint}>{hint}</Text> : null}
         {error ? (
           <Text accessibilityLiveRegion="polite" nativeID={errorId} style={styles.error}>
             {error}
@@ -52,6 +69,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
+  required: {
+    color: colors.error,
+  },
   input: {
     minHeight: 52,
     paddingHorizontal: spacing.lg,
@@ -65,8 +85,18 @@ const styles = StyleSheet.create({
   inputError: {
     borderColor: colors.error,
   },
+  inputMultiline: {
+    minHeight: 112,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.lg,
+  },
   error: {
     color: colors.error,
     fontSize: 13,
+  },
+  hint: {
+    color: colors.textMuted,
+    fontSize: 13,
+    lineHeight: 18,
   },
 });
