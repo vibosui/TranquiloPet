@@ -14,7 +14,7 @@ MVP mobile para conectar tutores de pets a cuidadores. O fluxo atual é um labor
 - 10 usuários, 5 tutores, 5 cuidadores e 20 pets fictícios semeados localmente;
 - monitor Python local com FastAPI e SQLite;
 - eventos sanitizados no CMD e painel web atualizado ao vivo;
-- suporte a desenvolvimento remoto com Expo Tunnel + ngrok para o monitor;
+- suporte a Expo Tunnel para testar o app fora da rede local;
 - testes automatizados mobile e Python.
 
 O login e o banco do aplicativo são implementações locais de desenvolvimento em AsyncStorage. O monitor continua sendo apenas uma ferramenta opcional de telemetria. O backend real será Supabase; não use dados reais, nem trate esta autenticação local como segurança de produção.
@@ -49,11 +49,9 @@ python -m venv .venv
 cd ..\..
 ```
 
-Para usar somente a rede local, copie `apps/mobile/.env.example` para `apps/mobile/.env.local` e troque `IP_DO_COMPUTADOR` pelo IPv4 da rede Wi-Fi.
+Para usar somente a rede local com o monitor, copie `apps/mobile/.env.example` para `apps/mobile/.env.local` e troque `IP_DO_COMPUTADOR` pelo IPv4 da rede Wi-Fi.
 
 ## Abrir em celulares pela rede local
-
-O app funciona sem monitor:
 
 ```powershell
 npm.cmd run start
@@ -63,40 +61,27 @@ O QR Code aparece nesse terminal; ele não é salvo como arquivo. Leia-o pelo Ex
 
 Os dados são independentes em cada aparelho e permanecem no armazenamento local do Expo Go. No Android e iOS, fotos escolhidas são copiadas para o diretório persistente do app; ainda não há upload ou sincronização entre aparelhos.
 
-## Desenvolvimento remoto com ngrok
+## Abrir em celulares pela internet com Expo Tunnel
 
-Use este modo quando o celular não estiver na mesma rede do computador, quando a rede bloquear conexões LAN ou quando quiser testar pela internet.
+Use este modo quando o celular não estiver na mesma rede do computador ou quando a rede bloquear conexões LAN. O Expo possui suporte nativo a tunnel via ngrok.
 
-O Expo possui suporte nativo a tunnel via ngrok. Instale uma vez:
+Instale uma vez o adaptador recomendado pelo Expo:
 
 ```powershell
 npm.cmd install -g @expo/ngrok
 ```
 
-Instale também o ngrok CLI, faça login na sua conta e configure o authtoken conforme a documentação oficial do ngrok. Confirme que o comando abaixo funciona:
+Depois, na raiz do projeto:
 
 ```powershell
-ngrok version
+npm.cmd run start:tunnel
 ```
 
-Depois, na raiz do projeto, execute somente:
+O Expo inicia com `expo start --tunnel` e mostra um QR Code acessível pelo Expo Go através da internet. Nesse modo o celular não precisa estar conectado ao mesmo Wi-Fi do computador.
 
-```powershell
-npm.cmd run dev:tunnel
-```
+O app continua funcionando porque os dados atuais são locais em AsyncStorage. O monitor FastAPI é opcional e permanece local; portanto, a telemetria do monitor pode ficar indisponível em um celular fora da sua rede sem impedir login, perfis, pets ou os demais fluxos locais do MVP.
 
-Esse comando:
-
-1. inicia o monitor FastAPI na porta `8000`;
-2. abre um tunnel HTTPS do ngrok para o monitor;
-3. lê automaticamente a URL pública pelo Agent API local do ngrok;
-4. grava `EXPO_PUBLIC_MONITOR_API_URL` em `apps/mobile/.env.local`;
-5. inicia o Expo com `expo start --tunnel`;
-6. exibe o QR Code que pode ser aberto pelo Expo Go mesmo fora da rede local.
-
-Ao encerrar o Expo com `Ctrl+C`, o script também encerra os processos do monitor e do ngrok que ele iniciou.
-
-O endereço público do monitor é temporário e pode mudar a cada execução. Ele é destinado somente a desenvolvimento com dados fictícios. Não publique dados pessoais, credenciais ou informações reais de tutores, cuidadores ou pets nesse monitor.
+Não use o tunnel como backend de produção. Quando o Supabase entrar no projeto, ele será o endpoint remoto compartilhado entre os aparelhos.
 
 ## Acompanhar interações no computador pela LAN
 
@@ -114,7 +99,7 @@ No segundo terminal, inicie o Expo caso ainda não esteja aberto:
 npm.cmd run start
 ```
 
-Computador e celulares devem estar na mesma rede. Antes de abrir o app, você pode confirmar no navegador do celular usando `http://IP_DO_COMPUTADOR:8000/api/health`.
+Computador e celulares devem estar na mesma rede para o monitor local. Antes de abrir o app, você pode confirmar no navegador do celular usando `http://IP_DO_COMPUTADOR:8000/api/health`.
 
 O CMD e o painel mostram login, consultas e salvamentos sem receber nome, e-mail, telefone, CPF, observações ou fotos.
 
