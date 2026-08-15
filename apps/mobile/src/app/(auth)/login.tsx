@@ -1,45 +1,34 @@
 import { useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { useRef, useState } from 'react';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { ErrorBanner } from '@/components/error-banner';
+import { FormField } from '@/components/form-field';
 import { PrimaryButton } from '@/components/primary-button';
 import { ScreenShell } from '@/components/screen-shell';
 import { SecondaryButton } from '@/components/secondary-button';
 import { SectionCard } from '@/components/section-card';
-import { useAppData } from '@/core/state/app-data-context';
-import { trackUsageInBackground } from '@/features/analytics/usage-tracker';
-import { SearchSelectField, type SearchSelectOption } from '@/features/locations';
-import { colors, spacing } from '@/theme/tokens';
-
-type UserOption = SearchSelectOption & { email: string };
+import { useAuth } from '@/core/auth/auth-context';
+import { colors, radii, spacing } from '@/theme/tokens';
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { clearError, database, error, signInByEmail } = useAppData();
-  const [selectedEmail, setSelectedEmail] = useState('');
+  const { clearError, error, signIn } = useAuth();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const passwordRef = useRef<TextInput>(null);
 
-  const userOptions = useMemo<readonly UserOption[]>(
-    () =>
-      (database?.users ?? []).map((user) => ({
-        key: user.id,
-        label: user.fullName,
-        searchText: `${user.fullName} ${user.email}`,
-        email: user.email,
-      })),
-    [database?.users],
-  );
+  const canSubmit = email.trim().length > 3 && password.length >= 6;
 
   async function handleSignIn() {
-    if (!selectedEmail || submitting) return;
+    if (!canSubmit || submitting) return;
     setSubmitting(true);
     clearError();
     try {
-      await signInByEmail(selectedEmail);
-      trackUsageInBackground({ eventName: 'demo_login_succeeded', screen: 'login' });
+      await signIn(email, password);
     } catch {
-      // O contexto apresenta uma mensagem sanitizada no banner.
+      // A mensagem sanitizada é exibida pelo contexto.
     } finally {
       setSubmitting(false);
     }
@@ -47,74 +36,96 @@ export default function LoginScreen() {
 
   return (
     <ScreenShell
-      eyebrow="AMBIENTE LOCAL"
-      title="Bem-vindo ao Tranquilo Pet"
-      subtitle="Escolha uma das contas fictícias para testar. Nenhuma senha ou token é armazenado.">
+      eyebrow="HOSPEDA PATAS"
+      title="Cuidado que acolhe. Confiança que fica."
+      subtitle="Entre para acompanhar hospedagens, conversar com seu contato e manter a rotina do pet registrada.">
+      <View style={styles.brandCard}>
+        <Text style={styles.brandMark}>HP</Text>
+        <View style={styles.brandCopy}>
+          <Text style={styles.brandName}>Hospeda Patas</Text>
+          <Text style={styles.brandCaption}>Transparência durante toda a hospedagem.</Text>
+        </View>
+      </View>
+
       {error ? <ErrorBanner message={error} /> : null}
 
-      <SectionCard
-        title="Acesso de demonstração"
-        description="Pesquise pelo nome ou e-mail de qualquer um dos 10 usuários.">
-        <SearchSelectField
-          label="Usuário de teste"
-          options={userOptions}
-          selectedKey={userOptions.find((option) => option.email === selectedEmail)?.key}
-          selectedLabel={
-            userOptions.find((option) => option.email === selectedEmail)?.label
-          }
-          placeholder="Selecionar usuário"
-          searchPlaceholder="Buscar nome ou e-mail"
-          onSelect={(option) => {
+      <SectionCard title="Entrar na sua conta">
+        <FormField
+          label="E-mail"
+          autoCapitalize="none"
+          autoComplete="email"
+          keyboardType="email-address"
+          returnKeyType="next"
+          value={email}
+          onChangeText={(value) => {
             clearError();
-            setSelectedEmail(option.email);
+            setEmail(value);
           }}
+          onSubmitEditing={() => passwordRef.current?.focus()}
         />
-
-        {selectedEmail ? (
-          <View style={styles.selection}>
-            <Text style={styles.selectionLabel}>Conta selecionada</Text>
-            <Text selectable style={styles.selectionValue}>
-              {selectedEmail}
-            </Text>
-          </View>
-        ) : null}
-
+        <FormField
+          ref={passwordRef}
+          label="Senha"
+          autoCapitalize="none"
+          autoComplete="password"
+          secureTextEntry
+          returnKeyType="done"
+          value={password}
+          onChangeText={(value) => {
+            clearError();
+            setPassword(value);
+          }}
+          onSubmitEditing={() => void handleSignIn()}
+        />
         <PrimaryButton
-          disabled={!selectedEmail}
-          label="Entrar no ambiente de teste"
+          disabled={!canSubmit}
+          label="Entrar"
           loading={submitting}
           onPress={() => void handleSignIn()}
         />
       </SectionCard>
 
       <View style={styles.registerBlock}>
-        <Text style={styles.registerCopy}>Quer testar um cadastro do zero?</Text>
-        <SecondaryButton label="Criar nova conta local" onPress={() => router.push('/register')} />
+        <Text style={styles.registerCopy}>Ainda não tem uma conta?</Text>
+        <SecondaryButton label="Criar conta" onPress={() => router.push('/register')} />
       </View>
-
-      <Text style={styles.note}>
-        Os dados ficam somente neste aparelho e podem ser removidos ao limpar os dados do Expo Go.
-      </Text>
     </ScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  selection: {
-    padding: spacing.md,
-    borderRadius: 12,
+  brandCard: {
+    padding: spacing.lg,
+    borderRadius: radii.lg,
     backgroundColor: colors.primarySoft,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
   },
-  selectionLabel: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: '700',
+  brandMark: {
+    width: 54,
+    height: 54,
+    borderRadius: radii.round,
+    backgroundColor: colors.primary,
+    color: colors.surface,
+    fontSize: 19,
+    fontWeight: '900',
+    lineHeight: 54,
+    textAlign: 'center',
   },
-  selectionValue: {
+  brandCopy: {
+    flex: 1,
+  },
+  brandName: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  brandCaption: {
     marginTop: spacing.xs,
-    color: colors.primary,
-    fontSize: 14,
-    fontWeight: '800',
+    color: colors.textMuted,
+    fontSize: 13,
+    lineHeight: 18,
   },
   registerBlock: {
     gap: spacing.md,
@@ -123,12 +134,6 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 15,
     fontWeight: '700',
-    textAlign: 'center',
-  },
-  note: {
-    color: colors.textMuted,
-    fontSize: 12,
-    lineHeight: 18,
     textAlign: 'center',
   },
 });
