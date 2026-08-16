@@ -24,7 +24,9 @@ if (!Number.isInteger(expoReadyTimeoutMs) || expoReadyTimeoutMs < 10000) {
 
 function isPrivateIPv4(address) {
   const parts = address.split('.').map(Number);
-  if (parts.length !== 4 || parts.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) return false;
+  if (parts.length !== 4 || parts.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) {
+    return false;
+  }
   if (parts[0] === 10) return true;
   if (parts[0] === 192 && parts[1] === 168) return true;
   return parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31;
@@ -48,19 +50,26 @@ function chooseLanAddress() {
   for (const [name, addresses] of Object.entries(networkInterfaces())) {
     for (const address of addresses ?? []) {
       if (address.family !== 'IPv4' || address.internal || !isPrivateIPv4(address.address)) continue;
-      candidates.push({ name, address: address.address, score: adapterPenalty(name) + adapterBonus(name) });
+      candidates.push({
+        name,
+        address: address.address,
+        score: adapterPenalty(name) + adapterBonus(name),
+      });
     }
   }
 
   candidates.sort((a, b) => a.score - b.score || a.name.localeCompare(b.name));
   if (!candidates.length) {
-    throw new Error('Nenhum IPv4 privado foi encontrado. Conecte o notebook à rede do evento ou defina HOSPEDA_PATAS_EVENT_HOST manualmente.');
+    throw new Error(
+      'Nenhum IPv4 privado foi encontrado. Conecte o notebook à rede do evento ou defina HOSPEDA_PATAS_EVENT_HOST manualmente.',
+    );
   }
 
   if (candidates.length > 1) {
     console.log('\nInterfaces LAN detectadas:');
     candidates.forEach((candidate, index) => {
-      console.log(`  ${candidate.name}: ${candidate.address}${index === 0 ? '  ← selecionada' : ''}`);
+      const selected = index === 0 ? '  ← selecionada' : '';
+      console.log(`  ${candidate.name}: ${candidate.address}${selected}`);
     });
     console.log('Se a interface escolhida estiver errada, defina HOSPEDA_PATAS_EVENT_HOST antes de iniciar.');
   }
@@ -84,12 +93,16 @@ function spawnCrossPlatform(command, args, options = {}) {
 }
 
 function startCloudflareQuickTunnel() {
+  const localUrl = `http://127.0.0.1:${port}`;
   return spawnCrossPlatform(
     process.platform === 'win32' ? 'npx.cmd' : 'npx',
-    ['--yes', 'wrangler@latest', 'tunnel', 'quick-start', `http://127.0.0.1:${port}`],
+    ['--yes', 'wrangler@latest', 'tunnel', 'quick-start', localUrl],
     {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, NO_COLOR: '1' },
+      env: {
+        ...process.env,
+        NO_COLOR: '1',
+      },
     },
   );
 }
@@ -98,11 +111,16 @@ function waitForPublicTunnel(child) {
   return new Promise((resolvePromise, rejectPromise) => {
     let settled = false;
     let buffer = '';
+
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
       child.kill('SIGTERM');
-      rejectPromise(new Error(`Cloudflare Quick Tunnel não publicou uma URL em ${Math.round(quickTunnelTimeoutMs / 1000)} s.`));
+      rejectPromise(
+        new Error(
+          `Cloudflare Quick Tunnel não publicou uma URL em ${Math.round(quickTunnelTimeoutMs / 1000)} s.`,
+        ),
+      );
     }, quickTunnelTimeoutMs);
 
     const inspect = (chunk, target) => {
@@ -118,12 +136,14 @@ function waitForPublicTunnel(child) {
 
     child.stdout?.on('data', (chunk) => inspect(chunk, process.stdout));
     child.stderr?.on('data', (chunk) => inspect(chunk, process.stderr));
+
     child.once('error', (error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       rejectPromise(error);
     });
+
     child.once('exit', (code) => {
       if (settled) return;
       settled = true;
@@ -146,7 +166,7 @@ function startExpo(publicTunnelUrl) {
   ];
 
   return spawnCrossPlatform(process.platform === 'win32' ? 'npm.cmd' : 'npm', npmArgs, {
-    stdio: ['inherit', 'pipe', 'pipe'],
+    stdio: 'inherit',
     env: {
       ...process.env,
       EXPO_NO_TELEMETRY: process.env.EXPO_NO_TELEMETRY || '1',
@@ -155,43 +175,51 @@ function startExpo(publicTunnelUrl) {
   });
 }
 
-function waitForExpoGoUrl(child) {
-  return new Promise((resolvePromise, rejectPromise) => {
-    let settled = false;
-    let buffer = '';
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      rejectPromise(new Error(`Expo não imprimiu o deep link do Expo Go em ${Math.round(expoReadyTimeoutMs / 1000)} s.`));
-    }, expoReadyTimeoutMs);
+async function sleep(ms) {
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
+}
 
-    const inspect = (chunk, target) => {
-      const text = chunk.toString();
-      target.write(text);
-      if (settled) return;
-      buffer = `${buffer}${stripAnsi(text)}`.slice(-16000);
-      const match = buffer.match(/Metro waiting on\s+(exp:\/\/[^\s]+)/i);
-      if (!match) return;
-      settled = true;
-      clearTimeout(timer);
-      resolvePromise(match[1].replace(/[),.;]+$/, ''));
-    };
+async function waitForExpoGoUrl() {
+  const deadline = Date.now() + expoReadyTimeoutMs;
+  const endpoint = `http://127.0.0.1:${port}/_expo/open?platform=android&runtime=expo`;
+  let lastError = null;
 
-    child.stdout?.on('data', (chunk) => inspect(chunk, process.stdout));
-    child.stderr?.on('data', (chunk) => inspect(chunk, process.stderr));
-    child.once('error', (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      rejectPromise(error);
-    });
-    child.once('exit', (code) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      rejectPromise(new Error(`Expo encerrou antes de publicar o deep link (código ${code ?? 'desconhecido'}).`));
-    });
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(endpoint, { signal: AbortSignal.timeout(3000) });
+      if (response.ok) {
+        const payload = await response.json();
+        if (typeof payload?.url === 'string' && /^exps?:\/\//i.test(payload.url)) {
+          return payload.url;
+        }
+      }
+    } catch (error) {
+      lastError = error;
+    }
+    await sleep(500);
+  }
+
+  throw new Error(
+    `Expo não publicou o deep link do Expo Go em ${Math.round(expoReadyTimeoutMs / 1000)} s${
+      lastError instanceof Error ? `: ${lastError.message}` : '.'
+    }`,
+  );
+}
+
+async function verifyExternalExpoEndpoint(publicTunnelUrl) {
+  const endpoint = `${publicTunnelUrl}/_expo/open?platform=android&runtime=expo`;
+  const response = await fetch(endpoint, {
+    headers: { accept: 'application/json' },
+    signal: AbortSignal.timeout(15000),
   });
+  if (!response.ok) {
+    throw new Error(`Tunnel respondeu HTTP ${response.status} ao endpoint do Expo.`);
+  }
+  const payload = await response.json();
+  if (typeof payload?.url !== 'string' || !/^exps?:\/\//i.test(payload.url)) {
+    throw new Error('Tunnel respondeu, mas não devolveu um deep link válido do Expo Go.');
+  }
+  return payload.url;
 }
 
 const host = forcedHost || chooseLanAddress();
@@ -204,10 +232,18 @@ const appUrlPath = resolve(outputDirectory, 'hospeda-patas-app-url.txt');
 const tunnelUrlPath = resolve(outputDirectory, 'hospeda-patas-tunnel-url.txt');
 
 await mkdir(outputDirectory, { recursive: true });
-await QRCode.toFile(demoQrPath, demoUrl, { width: 1600, margin: 4, errorCorrectionLevel: 'H' });
+await QRCode.toFile(demoQrPath, demoUrl, {
+  width: 1600,
+  margin: 4,
+  errorCorrectionLevel: 'H',
+});
 await writeFile(demoUrlPath, `${demoUrl}\n`, 'utf8');
 
-const terminalDemoQr = await QRCode.toString(demoUrl, { type: 'terminal', small: true, errorCorrectionLevel: 'M' });
+const terminalDemoQr = await QRCode.toString(demoUrl, {
+  type: 'terminal',
+  small: true,
+  errorCorrectionLevel: 'M',
+});
 
 console.log('\n============================================================');
 console.log(' HOSPEDA PATAS — MODO EVENTO');
@@ -249,12 +285,14 @@ try {
     stopAll('SIGTERM');
     process.exitCode = 1;
   });
+
   expoChild.once('exit', (code, signal) => {
     if (stopping || signal) return;
     console.error(`\nExpo encerrou (código ${code ?? 'desconhecido'}). Encerrando o tunnel.`);
     stopAll('SIGTERM');
     process.exitCode = code ?? 1;
   });
+
   tunnelChild.once('exit', (code, signal) => {
     if (stopping || signal) return;
     console.error(`\nCloudflare Tunnel encerrou (código ${code ?? 'desconhecido'}). Encerrando o Expo.`);
@@ -262,24 +300,37 @@ try {
     process.exitCode = code ?? 1;
   });
 
-  const appUrl = await waitForExpoGoUrl(expoChild);
+  const localAppUrl = await waitForExpoGoUrl();
+  const externalAppUrl = await verifyExternalExpoEndpoint(publicTunnelUrl);
   const tunnelHostname = new URL(publicTunnelUrl).hostname;
-  if (!appUrl.includes(tunnelHostname)) {
-    throw new Error(`Expo iniciou, mas o deep link não está usando o tunnel público ${tunnelHostname}. URL: ${appUrl}`);
+
+  if (!localAppUrl.includes(tunnelHostname) || !externalAppUrl.includes(tunnelHostname)) {
+    throw new Error(
+      `Expo iniciou, mas o deep link não está usando o tunnel público ${tunnelHostname}. URL local: ${localAppUrl}; URL externa: ${externalAppUrl}`,
+    );
   }
 
-  await QRCode.toFile(appQrPath, appUrl, { width: 1600, margin: 4, errorCorrectionLevel: 'H' });
-  await writeFile(appUrlPath, `${appUrl}\n`, 'utf8');
-  const terminalAppQr = await QRCode.toString(appUrl, { type: 'terminal', small: true, errorCorrectionLevel: 'M' });
+  await QRCode.toFile(appQrPath, externalAppUrl, {
+    width: 1600,
+    margin: 4,
+    errorCorrectionLevel: 'H',
+  });
+  await writeFile(appUrlPath, `${externalAppUrl}\n`, 'utf8');
+
+  const terminalAppQr = await QRCode.toString(externalAppUrl, {
+    type: 'terminal',
+    small: true,
+    errorCorrectionLevel: 'M',
+  });
 
   console.log('\n============================================================');
   console.log(' QR APP REAL — EXPO GO / INTERNET');
   console.log('============================================================');
   console.log(terminalAppQr);
-  console.log(`URL Expo Go: ${appUrl}`);
+  console.log(`URL Expo Go: ${externalAppUrl}`);
   console.log(`PNG do APP REAL: ${appQrPath}`);
   console.log(`URL salva em: ${appUrlPath}`);
-  console.log('✅ O Expo publicou o app usando o hostname público do Cloudflare.');
+  console.log('✅ Verificação externa concluída pelo próprio endereço público do Cloudflare.');
   console.log('Esse QR abre o aplicativo real e usa os usuários/dados reais do Supabase.');
   console.log('Pode ser aberto em outra Wi-Fi ou no 4G/5G enquanto este terminal estiver rodando.\n');
 } catch (error) {
