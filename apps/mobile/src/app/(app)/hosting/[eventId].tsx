@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 
+import { DateTimeField, parsePickerValue } from '@/components/date-time-field';
 import { ErrorBanner } from '@/components/error-banner';
 import { FormField } from '@/components/form-field';
 import { PrimaryButton } from '@/components/primary-button';
@@ -23,7 +24,7 @@ import { colors, radii, spacing } from '@/theme/tokens';
 
 type HostingStatus = 'draft' | 'sent' | 'accepted' | 'in_progress' | 'completed' | 'cancelled';
 type TaskCategory = 'meal' | 'water' | 'walk' | 'medication' | 'photo' | 'routine' | 'custom';
-type ScheduleMode = 'single' | 'interval' | 'specific';
+type ScheduleMode = 'event' | 'single' | 'interval' | 'specific';
 
 type HostingEvent = {
   id: string;
@@ -80,7 +81,14 @@ type TaskDraft = {
   intervalStart: string;
   intervalEnd: string;
   intervalMinutes: string;
-  specificTimes: string;
+  specificTimes: string[];
+  specificCandidate: string;
+};
+
+type TaskFieldErrors = {
+  title?: string;
+  schedule?: string;
+  specificCandidate?: string;
 };
 
 const emptyTaskDraft: TaskDraft = {
@@ -89,12 +97,13 @@ const emptyTaskDraft: TaskDraft = {
   instructions: '',
   petId: null,
   requiresPhoto: false,
-  scheduleMode: 'single',
+  scheduleMode: 'event',
   singleAt: '',
   intervalStart: '',
   intervalEnd: '',
   intervalMinutes: '30',
-  specificTimes: '',
+  specificTimes: [],
+  specificCandidate: '',
 };
 
 const statusLabels: Record<HostingStatus, string> = {
@@ -115,25 +124,8 @@ const statusCopy: Record<HostingStatus, string> = {
   cancelled: 'Este evento foi cancelado.',
 };
 
-function parseLocalDateTime(value: string) {
-  const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})$/);
-  if (!match) return null;
-  const [, year, month, day, hour, minute] = match;
-  const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute));
-  if (
-    date.getFullYear() !== Number(year) ||
-    date.getMonth() !== Number(month) - 1 ||
-    date.getDate() !== Number(day) ||
-    date.getHours() !== Number(hour) ||
-    date.getMinutes() !== Number(minute)
-  ) {
-    return null;
-  }
-  return date;
-}
-
 function formatDateTime(value: string | null) {
-  if (!value) return 'Sem horário';
+  if (!value) return 'Quando for realizado';
   return new Intl.DateTimeFormat('pt-BR', {
     dateStyle: 'short',
     timeStyle: 'short',
@@ -164,6 +156,7 @@ export default function HostingEventScreen() {
   const [tasks, setTasks] = useState<EventTask[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [taskDraft, setTaskDraft] = useState<TaskDraft>(emptyTaskDraft);
+  const [taskFieldErrors, setTaskFieldErrors] = useState<TaskFieldErrors>({});
   const [messageBody, setMessageBody] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -235,6 +228,8 @@ export default function HostingEventScreen() {
   const caregiver = event ? profiles.get(event.caregiver_id) : null;
   const incompleteTasks = useMemo(() => tasks.filter((task) => !task.completed_at), [tasks]);
   const completedTasks = tasks.length - incompleteTasks.length;
+  const eventMinimumDate = event?.starts_at ? new Date(event.starts_at) : undefined;
+  const eventMaximumDate = event?.ends_at ? new Date(event.ends_at) : undefined;
 
   function applyPreset(preset: 'arrival' | 'meal' | 'walk' | 'medication' | 'water' | 'custom') {
     const presets: Record<typeof preset, Partial<TaskDraft>> = {
@@ -243,7 +238,7 @@ export default function HostingEventScreen() {
         title: 'Recebimento do pet',
         instructions: 'Registrar como o pet chegou e confirmar o recebimento.',
         requiresPhoto: true,
-        scheduleMode: 'single',
+        scheduleMode: 'event',
       },
       meal: {
         category: 'meal',
@@ -275,26 +270,25 @@ export default function HostingEventScreen() {
       },
     };
     setTaskDraft((current) => ({ ...current, ...presets[preset] }));
+    setTaskFieldErrors({});
   }
 
-  function scheduledDatesForDraft() {
+  function scheduledDatesForDraft(): Array<Date | null> {
+    if (taskDraft.scheduleMode === 'event') return [null];
+
     if (taskDraft.scheduleMode === 'single') {
-      const parsed = parseLocalDateTime(taskDraft.singleAt);
+      const parsed = parsePickerValue(taskDraft.singleAt, 'datetime');
       return parsed ? [parsed] : [];
     }
 
     if (taskDraft.scheduleMode === 'specific') {
-      const values = taskDraft.specificTimes
-        .split(/[\n,;]+/)
-        .map((value) => value.trim())
-        .filter(Boolean);
-      const parsed = values.map(parseLocalDateTime);
-      if (parsed.some((value) => value === null)) return [];
+      const parsed = taskDraft.specificTimes.map((value) => parsePickerValue(value, 'datetime'));
+      if (!parsed.length || parsed.some((value) => value === null)) return [];
       return parsed as Date[];
     }
 
-    const start = parseLocalDateTime(taskDraft.intervalStart);
-    const end = parseLocalDateTime(taskDraft.intervalEnd);
+    const start = parsePickerValue(taskDraft.intervalStart, 'datetime');
+    const end = parsePickerValue(taskDraft.intervalEnd, 'datetime');
     const intervalMinutes = Number(taskDraft.intervalMinutes);
     if (!start || !end || end < start || !Number.isInteger(intervalMinutes) || intervalMinutes < 5) {
       return [];
@@ -311,16 +305,53 @@ export default function HostingEventScreen() {
     return dates;
   }
 
-  async function addTasks() {
-    if (!event || !user || !isTutor || event.status !== 'draft' || busy) return;
-    if (taskDraft.title.trim().length < 2) {
-      setError('Dê um nome para a tarefa.');
+  function addSpecificTime() {
+    const parsed = parsePickerValue(taskDraft.specificCandidate, 'datetime');
+    if (!parsed) {
+      setTaskFieldErrors((current) => ({
+        ...current,
+        specificCandidate: 'Selecione uma data e um horário antes de adicionar.',
+      }));
+      return;
+    }
+    if (taskDraft.specificTimes.includes(taskDraft.specificCandidate)) {
+      setTaskFieldErrors((current) => ({
+        ...current,
+        specificCandidate: 'Este horário já foi adicionado.',
+      }));
       return;
     }
 
+    setTaskDraft((current) => ({
+      ...current,
+      specificTimes: [...current.specificTimes, current.specificCandidate].sort(),
+      specificCandidate: '',
+    }));
+    setTaskFieldErrors((current) => ({ ...current, specificCandidate: undefined, schedule: undefined }));
+  }
+
+  async function addTasks() {
+    if (!event || !user || !isTutor || event.status !== 'draft' || busy) return;
+
+    const nextErrors: TaskFieldErrors = {};
+    if (taskDraft.title.trim().length < 2) nextErrors.title = 'Dê um nome para a tarefa.';
+
     const dates = scheduledDatesForDraft();
     if (!dates.length) {
-      setError('Revise os horários da tarefa. Use AAAA-MM-DD HH:mm.');
+      if (taskDraft.scheduleMode === 'specific') {
+        nextErrors.schedule = 'Adicione pelo menos um horário específico.';
+      } else if (taskDraft.scheduleMode === 'interval') {
+        nextErrors.schedule = 'Revise o início, fim e intervalo da recorrência.';
+      } else {
+        nextErrors.schedule = 'Selecione o horário da tarefa.';
+      }
+    }
+
+    setTaskFieldErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      const firstMessage = Object.values(nextErrors).find(Boolean) ?? 'Revise os campos do checklist.';
+      setError('Existem campos pendentes na nova tarefa.');
+      Alert.alert('Revise a tarefa', firstMessage);
       return;
     }
 
@@ -334,7 +365,7 @@ export default function HostingEventScreen() {
       category: taskDraft.category,
       title: taskDraft.title.trim(),
       instructions: taskDraft.instructions.trim() || null,
-      due_at: date.toISOString(),
+      due_at: date ? date.toISOString() : null,
       requires_photo: taskDraft.requiresPhoto,
       sort_order: baseSortOrder + index,
     }));
@@ -344,6 +375,7 @@ export default function HostingEventScreen() {
       setError('Não foi possível adicionar a tarefa ao checklist.');
     } else {
       setTaskDraft(emptyTaskDraft);
+      setTaskFieldErrors({});
       await loadEvent();
     }
     setBusy(false);
@@ -543,7 +575,7 @@ export default function HostingEventScreen() {
       {isTutor && event.status === 'draft' ? (
         <SectionCard
           title="Montar checklist"
-          description="Cada horário vira um item independente. Se exigir foto, o cuidador não consegue concluir sem evidência.">
+          description="Uma tarefa pode ter horário, ser recorrente ou ficar livre para ser concluída quando acontecer durante a hospedagem.">
           <View style={styles.presets}>
             <Preset label="📸 Recebimento" onPress={() => applyPreset('arrival')} />
             <Preset label="🍖 Refeição" onPress={() => applyPreset('meal')} />
@@ -553,8 +585,23 @@ export default function HostingEventScreen() {
             <Preset label="＋ Personalizada" onPress={() => applyPreset('custom')} />
           </View>
 
-          <FormField label="Tarefa" required value={taskDraft.title} onChangeText={(title) => setTaskDraft((current) => ({ ...current, title }))} />
-          <FormField label="Orientações" multiline value={taskDraft.instructions} onChangeText={(instructions) => setTaskDraft((current) => ({ ...current, instructions }))} />
+          <FormField
+            label="Tarefa"
+            required
+            value={taskDraft.title}
+            error={taskFieldErrors.title}
+            onChangeText={(title) => {
+              setTaskDraft((current) => ({ ...current, title }));
+              setTaskFieldErrors((current) => ({ ...current, title: undefined }));
+              setError(null);
+            }}
+          />
+          <FormField
+            label="Orientações"
+            multiline
+            value={taskDraft.instructions}
+            onChangeText={(instructions) => setTaskDraft((current) => ({ ...current, instructions }))}
+          />
 
           <Text style={styles.fieldLabel}>Pet relacionado</Text>
           <View style={styles.choices}>
@@ -586,33 +633,150 @@ export default function HostingEventScreen() {
             />
           </View>
 
-          <Text style={styles.fieldLabel}>Como gerar os horários?</Text>
+          <Text style={styles.fieldLabel}>Quando esta tarefa deve ser feita?</Text>
           <View style={styles.choices}>
-            <ChoiceChip selected={taskDraft.scheduleMode === 'single'} label="Um horário" onPress={() => setTaskDraft((current) => ({ ...current, scheduleMode: 'single' }))} />
-            <ChoiceChip selected={taskDraft.scheduleMode === 'interval'} label="Intervalo fixo" onPress={() => setTaskDraft((current) => ({ ...current, scheduleMode: 'interval' }))} />
-            <ChoiceChip selected={taskDraft.scheduleMode === 'specific'} label="Horários específicos" onPress={() => setTaskDraft((current) => ({ ...current, scheduleMode: 'specific' }))} />
+            <ChoiceChip
+              selected={taskDraft.scheduleMode === 'event'}
+              label="Quando for realizado"
+              onPress={() => {
+                setTaskDraft((current) => ({ ...current, scheduleMode: 'event' }));
+                setTaskFieldErrors((current) => ({ ...current, schedule: undefined }));
+              }}
+            />
+            <ChoiceChip
+              selected={taskDraft.scheduleMode === 'single'}
+              label="Um horário"
+              onPress={() => {
+                setTaskDraft((current) => ({ ...current, scheduleMode: 'single' }));
+                setTaskFieldErrors((current) => ({ ...current, schedule: undefined }));
+              }}
+            />
+            <ChoiceChip
+              selected={taskDraft.scheduleMode === 'interval'}
+              label="Intervalo fixo"
+              onPress={() => {
+                setTaskDraft((current) => ({ ...current, scheduleMode: 'interval' }));
+                setTaskFieldErrors((current) => ({ ...current, schedule: undefined }));
+              }}
+            />
+            <ChoiceChip
+              selected={taskDraft.scheduleMode === 'specific'}
+              label="Horários específicos"
+              onPress={() => {
+                setTaskDraft((current) => ({ ...current, scheduleMode: 'specific' }));
+                setTaskFieldErrors((current) => ({ ...current, schedule: undefined }));
+              }}
+            />
           </View>
 
+          {taskDraft.scheduleMode === 'event' ? (
+            <View style={styles.scheduleHint}>
+              <Text style={styles.scheduleHintTitle}>Sem horário obrigatório</Text>
+              <Text style={styles.scheduleHintText}>
+                O item ficará pendente durante a hospedagem e o cuidador marca quando realmente executar a ação.
+              </Text>
+            </View>
+          ) : null}
+
           {taskDraft.scheduleMode === 'single' ? (
-            <FormField label="Horário" placeholder="2026-08-20 19:00" value={taskDraft.singleAt} onChangeText={(singleAt) => setTaskDraft((current) => ({ ...current, singleAt }))} />
+            <DateTimeField
+              label="Data e horário"
+              mode="datetime"
+              minimumDate={eventMinimumDate}
+              maximumDate={eventMaximumDate}
+              placeholder="Selecionar horário"
+              value={taskDraft.singleAt}
+              error={taskFieldErrors.schedule}
+              onChange={(singleAt) => {
+                setTaskDraft((current) => ({ ...current, singleAt }));
+                setTaskFieldErrors((current) => ({ ...current, schedule: undefined }));
+              }}
+            />
           ) : null}
 
           {taskDraft.scheduleMode === 'interval' ? (
             <>
-              <FormField label="Primeiro registro" placeholder="2026-08-20 14:00" value={taskDraft.intervalStart} onChangeText={(intervalStart) => setTaskDraft((current) => ({ ...current, intervalStart }))} />
-              <FormField label="Último registro" placeholder="2026-08-20 16:00" value={taskDraft.intervalEnd} onChangeText={(intervalEnd) => setTaskDraft((current) => ({ ...current, intervalEnd }))} />
-              <FormField label="Intervalo em minutos" keyboardType="number-pad" value={taskDraft.intervalMinutes} onChangeText={(intervalMinutes) => setTaskDraft((current) => ({ ...current, intervalMinutes }))} />
+              <DateTimeField
+                label="Primeiro registro"
+                mode="datetime"
+                minimumDate={eventMinimumDate}
+                maximumDate={eventMaximumDate}
+                placeholder="Selecionar início"
+                value={taskDraft.intervalStart}
+                onChange={(intervalStart) => {
+                  setTaskDraft((current) => ({ ...current, intervalStart }));
+                  setTaskFieldErrors((current) => ({ ...current, schedule: undefined }));
+                }}
+              />
+              <DateTimeField
+                label="Último registro"
+                mode="datetime"
+                minimumDate={parsePickerValue(taskDraft.intervalStart, 'datetime') ?? eventMinimumDate}
+                maximumDate={eventMaximumDate}
+                placeholder="Selecionar término"
+                value={taskDraft.intervalEnd}
+                error={taskFieldErrors.schedule}
+                onChange={(intervalEnd) => {
+                  setTaskDraft((current) => ({ ...current, intervalEnd }));
+                  setTaskFieldErrors((current) => ({ ...current, schedule: undefined }));
+                }}
+              />
+              <FormField
+                label="Intervalo em minutos"
+                keyboardType="number-pad"
+                hint="Mínimo de 5 minutos. Cada ocorrência vira um item separado no checklist."
+                value={taskDraft.intervalMinutes}
+                error={taskFieldErrors.schedule}
+                onChangeText={(intervalMinutes) => {
+                  setTaskDraft((current) => ({ ...current, intervalMinutes }));
+                  setTaskFieldErrors((current) => ({ ...current, schedule: undefined }));
+                }}
+              />
             </>
           ) : null}
 
           {taskDraft.scheduleMode === 'specific' ? (
-            <FormField
-              label="Horários específicos"
-              hint="Um por linha ou separados por vírgula. Ex.: 2026-08-20 08:00"
-              multiline
-              value={taskDraft.specificTimes}
-              onChangeText={(specificTimes) => setTaskDraft((current) => ({ ...current, specificTimes }))}
-            />
+            <View style={styles.specificBlock}>
+              <DateTimeField
+                label="Adicionar data e horário"
+                mode="datetime"
+                minimumDate={eventMinimumDate}
+                maximumDate={eventMaximumDate}
+                placeholder="Selecionar horário"
+                value={taskDraft.specificCandidate}
+                error={taskFieldErrors.specificCandidate}
+                onChange={(specificCandidate) => {
+                  setTaskDraft((current) => ({ ...current, specificCandidate }));
+                  setTaskFieldErrors((current) => ({ ...current, specificCandidate: undefined }));
+                }}
+              />
+              <SecondaryButton label="Adicionar este horário" onPress={addSpecificTime} />
+              {taskDraft.specificTimes.length ? (
+                <View style={styles.specificList}>
+                  {taskDraft.specificTimes.map((time) => (
+                    <View key={time} style={styles.specificItem}>
+                      <Text style={styles.specificTime}>{formatDateTime(parsePickerValue(time, 'datetime')?.toISOString() ?? null)}</Text>
+                      <Pressable
+                        accessibilityRole="button"
+                        onPress={() =>
+                          setTaskDraft((current) => ({
+                            ...current,
+                            specificTimes: current.specificTimes.filter((candidate) => candidate !== time),
+                          }))
+                        }>
+                        <Text style={styles.specificRemove}>Remover</Text>
+                      </Pressable>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.scheduleValidation}>{taskFieldErrors.schedule ?? 'Nenhum horário adicionado ainda.'}</Text>
+              )}
+            </View>
+          ) : null}
+
+          {taskFieldErrors.schedule && taskDraft.scheduleMode !== 'single' && taskDraft.scheduleMode !== 'interval' && taskDraft.scheduleMode !== 'specific' ? (
+            <Text style={styles.scheduleValidation}>{taskFieldErrors.schedule}</Text>
           ) : null}
 
           <PrimaryButton label="Adicionar ao checklist" loading={busy} onPress={() => void addTasks()} />
@@ -628,7 +792,9 @@ export default function HostingEventScreen() {
               <View style={styles.taskTop}>
                 <View style={styles.taskCopy}>
                   <Text style={[styles.taskTitle, task.completed_at && styles.taskTitleDone]}>{task.title}</Text>
-                  <Text style={styles.taskMeta}>{formatDateTime(task.due_at)}{task.requires_photo ? ' • 📸 foto obrigatória' : ''}</Text>
+                  <Text style={styles.taskMeta}>
+                    {formatDateTime(task.due_at)}{task.requires_photo ? ' • 📸 foto obrigatória' : ''}
+                  </Text>
                   {task.instructions ? <Text style={styles.taskInstructions}>{task.instructions}</Text> : null}
                 </View>
                 <Text style={styles.taskCheck}>{task.completed_at ? '✓' : '○'}</Text>
@@ -975,6 +1141,54 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 11,
     lineHeight: 16,
+  },
+  scheduleHint: {
+    padding: spacing.md,
+    borderRadius: radii.md,
+    backgroundColor: colors.successSoft,
+    gap: spacing.xs,
+  },
+  scheduleHintTitle: {
+    color: colors.success,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  scheduleHintText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  scheduleValidation: {
+    color: colors.error,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  specificBlock: {
+    gap: spacing.md,
+  },
+  specificList: {
+    gap: spacing.sm,
+  },
+  specificItem: {
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    backgroundColor: colors.surfaceMuted,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  specificTime: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  specificRemove: {
+    color: colors.error,
+    fontSize: 12,
+    fontWeight: '800',
   },
   taskList: {
     gap: spacing.sm,
