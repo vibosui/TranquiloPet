@@ -27,6 +27,9 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Reset script syntax
+        run: node --check scripts/reset-dev-database.mjs
+
       - name: TypeScript
         run: npm run typecheck
 
