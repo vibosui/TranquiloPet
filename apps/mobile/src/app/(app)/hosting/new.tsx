@@ -1,7 +1,8 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { DateTimeField, parsePickerValue } from '@/components/date-time-field';
 import { ErrorBanner } from '@/components/error-banner';
 import { FormField } from '@/components/form-field';
 import { PrimaryButton } from '@/components/primary-button';
@@ -34,22 +35,11 @@ type PetRow = {
   updated_at: string;
 };
 
-function parseLocalDateTime(value: string) {
-  const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})$/);
-  if (!match) return null;
-  const [, year, month, day, hour, minute] = match;
-  const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute));
-  if (
-    date.getFullYear() !== Number(year) ||
-    date.getMonth() !== Number(month) - 1 ||
-    date.getDate() !== Number(day) ||
-    date.getHours() !== Number(hour) ||
-    date.getMinutes() !== Number(minute)
-  ) {
-    return null;
-  }
-  return date;
-}
+type FieldErrors = {
+  pets?: string;
+  startsAt?: string;
+  endsAt?: string;
+};
 
 export default function NewHostingScreen() {
   const router = useRouter();
@@ -63,6 +53,7 @@ export default function NewHostingScreen() {
   const [startsAt, setStartsAt] = useState('');
   const [endsAt, setEndsAt] = useState('');
   const [instructions, setInstructions] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -133,29 +124,38 @@ export default function NewHostingScreen() {
     [pets, selectedPetIds],
   );
 
+  function showBlockingError(message: string) {
+    setError(message);
+    Alert.alert('Não foi possível continuar', message);
+  }
+
   async function createHosting() {
     if (!user || !profile || !connection || !caregiver || submitting) return;
     if (!profile.tutor_enabled) {
-      setError('Ative o papel de Tutor no seu perfil antes de criar uma hospedagem.');
+      showBlockingError('Ative o papel de Tutor no seu perfil antes de criar uma hospedagem.');
       return;
     }
     if (!caregiver.caregiver_enabled) {
-      setError('Este contato ainda não ativou o papel de Cuidador.');
-      return;
-    }
-    if (selectedPets.length === 0) {
-      setError('Selecione pelo menos um pet para a hospedagem.');
+      showBlockingError('Este contato ainda não ativou o papel de Cuidador.');
       return;
     }
 
-    const startDate = parseLocalDateTime(startsAt);
-    const endDate = parseLocalDateTime(endsAt);
-    if (!startDate || !endDate) {
-      setError('Informe início e fim no formato AAAA-MM-DD HH:mm.');
-      return;
+    const nextFieldErrors: FieldErrors = {};
+    if (selectedPets.length === 0) nextFieldErrors.pets = 'Selecione pelo menos um pet.';
+
+    const startDate = parsePickerValue(startsAt, 'datetime');
+    const endDate = parsePickerValue(endsAt, 'datetime');
+    if (!startDate) nextFieldErrors.startsAt = 'Selecione a data e o horário de início.';
+    if (!endDate) nextFieldErrors.endsAt = 'Selecione a data e o horário de término.';
+    if (startDate && endDate && endDate <= startDate) {
+      nextFieldErrors.endsAt = 'O término precisa acontecer depois do início.';
     }
-    if (endDate <= startDate) {
-      setError('O término da hospedagem precisa ocorrer depois do início.');
+
+    setFieldErrors(nextFieldErrors);
+    if (Object.keys(nextFieldErrors).length > 0) {
+      const firstMessage = Object.values(nextFieldErrors).find(Boolean) ?? 'Revise os campos obrigatórios.';
+      setError('Existem campos obrigatórios pendentes. Revise os itens destacados.');
+      Alert.alert('Revise os campos obrigatórios', firstMessage);
       return;
     }
 
@@ -175,8 +175,8 @@ export default function NewHostingScreen() {
         caregiver_id: caregiver.id,
         title: title.trim() || defaultTitle,
         status: 'draft',
-        starts_at: startDate.toISOString(),
-        ends_at: endDate.toISOString(),
+        starts_at: startDate!.toISOString(),
+        ends_at: endDate!.toISOString(),
         tutor_instructions: instructions.trim() || null,
       })
       .select('id')
@@ -272,14 +272,17 @@ export default function NewHostingScreen() {
                   key={pet.id}
                   accessibilityRole="button"
                   accessibilityState={{ selected }}
-                  onPress={() =>
+                  onPress={() => {
                     setSelectedPetIds((current) =>
                       selected ? current.filter((id) => id !== pet.id) : [...current, pet.id],
-                    )
-                  }
+                    );
+                    setFieldErrors((current) => ({ ...current, pets: undefined }));
+                    setError(null);
+                  }}
                   style={({ pressed }) => [
                     styles.petCard,
                     selected && styles.petCardSelected,
+                    fieldErrors.pets && styles.petCardError,
                     pressed && styles.pressed,
                   ]}>
                   <Text style={styles.petEmoji}>{pet.species === 'cat' ? '🐱' : pet.species === 'dog' ? '🐶' : '🐾'}</Text>
@@ -291,11 +294,12 @@ export default function NewHostingScreen() {
                 </Pressable>
               );
             })}
+            {fieldErrors.pets ? <Text style={styles.fieldError}>{fieldErrors.pets}</Text> : null}
           </View>
         )}
       </SectionCard>
 
-      <SectionCard title="2. Período">
+      <SectionCard title="2. Período" description="Toque nos campos para abrir o calendário e o seletor de horário do aparelho.">
         <FormField
           label="Título da hospedagem"
           hint="Opcional. Se deixar vazio, usamos o nome dos pets."
@@ -303,20 +307,32 @@ export default function NewHostingScreen() {
           value={title}
           onChangeText={setTitle}
         />
-        <FormField
+        <DateTimeField
           required
           label="Início"
-          hint="Formato temporário do MVP: AAAA-MM-DD HH:mm"
-          placeholder="2026-08-20 18:00"
+          mode="datetime"
+          placeholder="Selecionar início"
           value={startsAt}
-          onChangeText={setStartsAt}
+          error={fieldErrors.startsAt}
+          onChange={(value) => {
+            setStartsAt(value);
+            setFieldErrors((current) => ({ ...current, startsAt: undefined }));
+            setError(null);
+          }}
         />
-        <FormField
+        <DateTimeField
           required
           label="Término"
-          placeholder="2026-08-23 18:00"
+          mode="datetime"
+          minimumDate={parsePickerValue(startsAt, 'datetime') ?? undefined}
+          placeholder="Selecionar término"
           value={endsAt}
-          onChangeText={setEndsAt}
+          error={fieldErrors.endsAt}
+          onChange={(value) => {
+            setEndsAt(value);
+            setFieldErrors((current) => ({ ...current, endsAt: undefined }));
+            setError(null);
+          }}
         />
       </SectionCard>
 
@@ -379,6 +395,9 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
     backgroundColor: colors.primarySoft,
   },
+  petCardError: {
+    borderColor: colors.error,
+  },
   pressed: {
     opacity: 0.75,
   },
@@ -405,5 +424,10 @@ const styles = StyleSheet.create({
   },
   checkSelected: {
     color: colors.primary,
+  },
+  fieldError: {
+    color: colors.error,
+    fontSize: 13,
+    fontWeight: '700',
   },
 });
