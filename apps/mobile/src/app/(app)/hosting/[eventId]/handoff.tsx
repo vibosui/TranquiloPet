@@ -1,8 +1,9 @@
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { DateTimeField } from '@/components/date-time-field';
 import { ErrorBanner } from '@/components/error-banner';
 import { FormField } from '@/components/form-field';
 import { PrimaryButton } from '@/components/primary-button';
@@ -47,6 +48,12 @@ type PetDraft = {
   petId: string;
   name: string;
   snapshot: HandoffSnapshot;
+};
+
+type PetValidationErrors = {
+  recordedAt?: string;
+  petState?: string;
+  photos?: string;
 };
 
 const emptyHandoff: HandoffSnapshot = {
@@ -125,6 +132,7 @@ export default function HandoffPreparationScreen() {
   const [event, setEvent] = useState<HostingEvent | null>(null);
   const [drafts, setDrafts] = useState<PetDraft[]>([]);
   const [signedUrls, setSignedUrls] = useState<Map<string, string>>(new Map());
+  const [validationErrors, setValidationErrors] = useState<Record<string, PetValidationErrors>>({});
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -204,11 +212,19 @@ export default function HandoffPreparationScreen() {
     [drafts],
   );
 
+  function clearValidation(petId: string, field: keyof PetValidationErrors) {
+    setValidationErrors((current) => ({
+      ...current,
+      [petId]: { ...current[petId], [field]: undefined },
+    }));
+    setError(null);
+  }
+
   function patchPet(petId: string, patch: Partial<HandoffSnapshot>) {
     setDrafts((current) =>
       current.map((draft) =>
         draft.petId === petId
-          ? { draft, ...draft, snapshot: { ...draft.snapshot, ...patch } }
+          ? { ...draft, snapshot: { ...draft.snapshot, ...patch } }
           : draft,
       ),
     );
@@ -261,6 +277,7 @@ export default function HandoffPreparationScreen() {
         { kind, storage_path: storagePath },
       ];
       patchPet(petId, { photos: nextPhotos, prepared: false });
+      clearValidation(petId, 'photos');
 
       if (oldPhoto) {
         await supabase.storage.from('event-media').remove([oldPhoto.storage_path]);
@@ -291,25 +308,34 @@ export default function HandoffPreparationScreen() {
     setBusyKey(null);
   }
 
-  function validate(draft: PetDraft) {
-    if (!draft.snapshot.recorded_at.trim()) return 'Informe data e horário do registro.';
-    if (!draft.snapshot.pet_state) return 'Informe como o pet está no momento da entrega.';
+  function validate(draft: PetDraft): PetValidationErrors {
+    const nextErrors: PetValidationErrors = {};
+    if (!draft.snapshot.recorded_at.trim()) nextErrors.recordedAt = 'Selecione a data e o horário do registro.';
+    if (!draft.snapshot.pet_state) nextErrors.petState = 'Informe como o pet está no momento da entrega.';
     const requiredPhotoKinds: PhotoKind[] = ['face', 'full_body'];
     if (requiredPhotoKinds.some((kind) => !draft.snapshot.photos.some((photo) => photo.kind === kind))) {
-      return 'Inclua pelo menos foto do rosto e do corpo inteiro.';
+      nextErrors.photos = 'Inclua foto do rosto e do corpo inteiro.';
     }
-    return null;
+    return nextErrors;
   }
 
   async function saveAll() {
     if (!event || !canEdit || saving) return;
 
-    for (const draft of drafts) {
-      const validationError = validate(draft);
-      if (validationError) {
-        setError(`${draft.name}: ${validationError}`);
-        return;
-      }
+    const nextValidationErrors = Object.fromEntries(
+      drafts.map((draft) => [draft.petId, validate(draft)]),
+    ) as Record<string, PetValidationErrors>;
+    setValidationErrors(nextValidationErrors);
+
+    const firstInvalidDraft = drafts.find(
+      (draft) => Object.values(nextValidationErrors[draft.petId] ?? {}).some(Boolean),
+    );
+    if (firstInvalidDraft) {
+      const firstMessage = Object.values(nextValidationErrors[firstInvalidDraft.petId]).find(Boolean);
+      const message = `${firstInvalidDraft.name}: ${firstMessage ?? 'revise os campos obrigatórios.'}`;
+      setError('Existem campos obrigatórios pendentes no registro de entrega.');
+      Alert.alert('Revise o registro de entrega', message);
+      return;
     }
 
     setSaving(true);
@@ -328,6 +354,13 @@ export default function HandoffPreparationScreen() {
         if (rpcError) throw rpcError;
       }
       await loadData();
+      Alert.alert('Registro salvo', 'A preparação da entrega foi salva e marcada como pronta.', [
+        { text: 'Continuar editando', style: 'cancel' },
+        {
+          text: 'Voltar para hospedagem',
+          onPress: () => router.replace({ pathname: '/hosting/[eventId]', params: { eventId: event.id } }),
+        },
+      ]);
     } catch {
       setError('Não foi possível salvar a preparação da entrega.');
     } finally {
@@ -365,98 +398,123 @@ export default function HandoffPreparationScreen() {
         </View>
       ) : null}
 
-      {drafts.map((draft) => (
-        <SectionCard
-          key={draft.petId}
-          title={`🎒 ${draft.name}`}
-          description={draft.snapshot.prepared ? 'Registro preparado.' : 'Complete os dados antes do início da hospedagem.'}>
-          <Text style={styles.fieldLabel}>O que está sendo enviado?</Text>
-          <View style={styles.choices}>
-            {itemOptions.map(([key, label]) => (
-              <ChoiceChip
-                key={key}
-                disabled={!canEdit}
-                label={label}
-                selected={draft.snapshot.items.includes(key)}
-                onPress={() => toggleItem(draft.petId, key)}
-              />
-            ))}
-          </View>
+      {drafts.map((draft) => {
+        const draftErrors = validationErrors[draft.petId] ?? {};
+        return (
+          <SectionCard
+            key={draft.petId}
+            title={`🎒 ${draft.name}`}
+            description={draft.snapshot.prepared ? 'Registro preparado.' : 'Complete os dados antes do início da hospedagem.'}>
+            <Text style={styles.fieldLabel}>O que está sendo enviado?</Text>
+            <View style={styles.choices}>
+              {itemOptions.map(([key, label]) => (
+                <ChoiceChip
+                  key={key}
+                  disabled={!canEdit}
+                  label={label}
+                  selected={draft.snapshot.items.includes(key)}
+                  onPress={() => toggleItem(draft.petId, key)}
+                />
+              ))}
+            </View>
 
-          <FormField
-            editable={canEdit}
-            label="Quantidade / detalhes dos itens"
-            hint="Ex.: 2 kg de ração, 3 comprimidos, 1 cobertor azul."
-            multiline
-            value={draft.snapshot.item_quantities}
-            onChangeText={(item_quantities) => patchPet(draft.petId, { item_quantities, prepared: false })}
-          />
+            <FormField
+              editable={canEdit}
+              label="Quantidade / detalhes dos itens"
+              hint="Ex.: 2 kg de ração, 3 comprimidos, 1 cobertor azul."
+              multiline
+              value={draft.snapshot.item_quantities}
+              onChangeText={(item_quantities) => patchPet(draft.petId, { item_quantities, prepared: false })}
+            />
 
-          <FormField
-            editable={canEdit}
-            label="Data e horário do registro"
-            hint="Formato temporário: AAAA-MM-DD HH:mm"
-            placeholder="2026-08-20 18:00"
-            value={draft.snapshot.recorded_at}
-            onChangeText={(recorded_at) => patchPet(draft.petId, { recorded_at, prepared: false })}
-          />
+            <DateTimeField
+              required
+              disabled={!canEdit}
+              label="Data e horário do registro"
+              mode="datetime"
+              placeholder="Selecionar data e horário"
+              value={draft.snapshot.recorded_at}
+              error={draftErrors.recordedAt}
+              onChange={(recorded_at) => {
+                patchPet(draft.petId, { recorded_at, prepared: false });
+                clearValidation(draft.petId, 'recordedAt');
+              }}
+            />
 
-          <Text style={styles.fieldLabel}>Como ele está hoje?</Text>
-          <View style={styles.choices}>
-            {[
-              ['normal', 'Normal'],
-              ['tired', 'Mais cansado'],
-              ['agitated', 'Mais agitado'],
-              ['anxious', 'Ansioso'],
-              ['altered', 'Apresenta alteração'],
-            ].map(([key, label]) => (
-              <ChoiceChip
-                key={key}
-                disabled={!canEdit}
-                label={label}
-                selected={draft.snapshot.pet_state === key}
-                onPress={() => patchPet(draft.petId, { pet_state: key, prepared: false })}
-              />
-            ))}
-          </View>
+            <Text style={styles.fieldLabel}>Como ele está hoje? *</Text>
+            <View style={[styles.choices, draftErrors.petState && styles.choiceGroupError]}>
+              {[
+                ['normal', 'Normal'],
+                ['tired', 'Mais cansado'],
+                ['agitated', 'Mais agitado'],
+                ['anxious', 'Ansioso'],
+                ['altered', 'Apresenta alteração'],
+              ].map(([key, label]) => (
+                <ChoiceChip
+                  key={key}
+                  disabled={!canEdit}
+                  label={label}
+                  selected={draft.snapshot.pet_state === key}
+                  onPress={() => {
+                    patchPet(draft.petId, { pet_state: key, prepared: false });
+                    clearValidation(draft.petId, 'petState');
+                  }}
+                />
+              ))}
+            </View>
+            {draftErrors.petState ? <Text style={styles.validationText}>{draftErrors.petState}</Text> : null}
 
-          <FormField
-            editable={canEdit}
-            label="Observação"
-            multiline
-            value={draft.snapshot.observation}
-            onChangeText={(observation) => patchPet(draft.petId, { observation, prepared: false })}
-          />
+            <FormField
+              editable={canEdit}
+              label="Observação"
+              multiline
+              value={draft.snapshot.observation}
+              onChangeText={(observation) => patchPet(draft.petId, { observation, prepared: false })}
+            />
 
-          <Text style={styles.fieldLabel}>📸 Fotos antes da hospedagem</Text>
-          <Text style={styles.helper}>Rosto e corpo inteiro são obrigatórios para marcar o registro como preparado.</Text>
-          <View style={styles.photoGrid}>
-            {photoKinds.map(([kind, label]) => {
-              const photo = draft.snapshot.photos.find((candidate) => candidate.kind === kind);
-              const url = photo ? signedUrls.get(photo.storage_path) : null;
-              const busy = busyKey === `${draft.petId}:${kind}`;
-              return (
-                <View key={kind} style={styles.photoSlot}>
-                  <Text style={styles.photoLabel}>{label}</Text>
-                  {url ? <Image source={{ uri: url }} style={styles.photoPreview} /> : <View style={styles.photoEmpty}><Text style={styles.photoEmptyText}>{busy ? '...' : '＋'}</Text></View>}
-                  {canEdit ? (
-                    <View style={styles.photoActions}>
-                      <Pressable disabled={Boolean(busyKey)} onPress={() => void addPhoto(draft.petId, kind)} style={({ pressed }) => [styles.photoAction, pressed && styles.pressed]}>
-                        <Text style={styles.photoActionText}>{photo ? 'Trocar' : 'Adicionar'}</Text>
-                      </Pressable>
-                      {photo ? (
-                        <Pressable disabled={Boolean(busyKey)} onPress={() => void removePhoto(draft.petId, kind)} style={({ pressed }) => [styles.photoAction, pressed && styles.pressed]}>
-                          <Text style={styles.removeText}>Remover</Text>
+            <Text style={styles.fieldLabel}>📸 Fotos antes da hospedagem *</Text>
+            <Text style={styles.helper}>Rosto e corpo inteiro são obrigatórios para marcar o registro como preparado.</Text>
+            {draftErrors.photos ? <Text style={styles.validationText}>{draftErrors.photos}</Text> : null}
+            <View style={styles.photoGrid}>
+              {photoKinds.map(([kind, label]) => {
+                const photo = draft.snapshot.photos.find((candidate) => candidate.kind === kind);
+                const url = photo ? signedUrls.get(photo.storage_path) : null;
+                const busy = busyKey === `${draft.petId}:${kind}`;
+                return (
+                  <View key={kind} style={[styles.photoSlot, draftErrors.photos && (kind === 'face' || kind === 'full_body') && styles.photoSlotError]}>
+                    <Text style={styles.photoLabel}>{label}</Text>
+                    {url ? (
+                      <Image source={{ uri: url }} style={styles.photoPreview} />
+                    ) : (
+                      <View style={styles.photoEmpty}>
+                        <Text style={styles.photoEmptyText}>{busy ? '...' : '＋'}</Text>
+                      </View>
+                    )}
+                    {canEdit ? (
+                      <View style={styles.photoActions}>
+                        <Pressable
+                          disabled={Boolean(busyKey)}
+                          onPress={() => void addPhoto(draft.petId, kind)}
+                          style={({ pressed }) => [styles.photoAction, pressed && styles.pressed]}>
+                          <Text style={styles.photoActionText}>{photo ? 'Trocar' : 'Adicionar'}</Text>
                         </Pressable>
-                      ) : null}
-                    </View>
-                  ) : null}
-                </View>
-              );
-            })}
-          </View>
-        </SectionCard>
-      ))}
+                        {photo ? (
+                          <Pressable
+                            disabled={Boolean(busyKey)}
+                            onPress={() => void removePhoto(draft.petId, kind)}
+                            style={({ pressed }) => [styles.photoAction, pressed && styles.pressed]}>
+                            <Text style={styles.removeText}>Remover</Text>
+                          </Pressable>
+                        ) : null}
+                      </View>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </View>
+          </SectionCard>
+        );
+      })}
 
       {canEdit ? (
         <PrimaryButton
@@ -528,6 +586,17 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: spacing.sm,
   },
+  choiceGroupError: {
+    padding: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.error,
+    borderRadius: radii.md,
+  },
+  validationText: {
+    color: colors.error,
+    fontSize: 13,
+    fontWeight: '700',
+  },
   choice: {
     minHeight: 40,
     paddingHorizontal: spacing.md,
@@ -563,6 +632,9 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     backgroundColor: colors.surface,
     gap: spacing.sm,
+  },
+  photoSlotError: {
+    borderColor: colors.error,
   },
   photoLabel: {
     color: colors.text,
