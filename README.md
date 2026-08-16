@@ -139,6 +139,34 @@ Na raiz:
 npm.cmd install
 ```
 
+## Reset de dados de desenvolvimento
+
+Existe uma rotina administrativa **somente para desenvolvimento**. Ela preserva schema, migrations, funções, RLS e buckets, mas esvazia os buckets do MVP e remove todos os usuários; as cascatas do banco removem perfis, pets, contatos, hospedagens, tarefas, chats, evidências e notificações relacionados.
+
+Na primeira utilização, copie o template:
+
+```powershell
+Copy-Item .env.reset.example .env.reset.local
+```
+
+Edite `.env.reset.local`, informe uma `SUPABASE_SECRET_KEY` de backend e altere a trava para:
+
+```text
+HOSPEDA_PATAS_ALLOW_DB_RESET=YES
+```
+
+A secret key é obtida no painel do Supabase em **Settings > API Keys** e nunca deve ser colocada em `EXPO_PUBLIC_*`, no app mobile ou em commit. O arquivo `.env.reset.local` é ignorado pelo Git.
+
+Comandos disponíveis:
+
+```powershell
+npm.cmd run db:reset
+npm.cmd run start:clean
+npm.cmd run start:tunnel:clean
+```
+
+`db:reset` apenas limpa os dados. `start:clean` limpa e inicia o Expo local; `start:tunnel:clean` limpa e inicia pelo tunnel. Antes de apagar, o script exige a frase `LIMPAR HOSPEDA PATAS` e também recusa execução caso a URL configurada não pertença ao project ref `inenqyqkfpczotnlimkf`.
+
 ## Executar pela internet
 
 Para testar em celulares que não estão na mesma rede do computador:
