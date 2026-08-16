@@ -5,6 +5,7 @@
   "description": "Plataforma mobile para hospedagem de pets com transparência, checklist e acompanhamento do cuidado.",
   "scripts": {
     "start": "npm run start --workspace=@hospeda-patas/mobile",
+    "start:event": "node scripts/start-event-demo.mjs",
     "start:clean": "npm run db:reset && npm run start",
     "start:tunnel": "npm run start:tunnel --workspace=@hospeda-patas/mobile",
     "start:tunnel:clean": "npm run db:reset && npm run start:tunnel",
@@ -30,6 +31,7 @@
   },
   "devDependencies": {
     "@supabase/supabase-js": "^2.111.0",
+    "qrcode": "^1.5.4",
     "react": "19.1.0",
     "test-renderer": "1.1.0"
   }
