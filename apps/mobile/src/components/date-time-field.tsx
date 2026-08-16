@@ -3,7 +3,7 @@ import DateTimePicker, {
   type DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
 import { useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { FormField } from '@/components/form-field';
 import { colors, radii, spacing } from '@/theme/tokens';
@@ -250,7 +250,9 @@ export function DateTimeField({
           pressed && styles.fieldPressed,
           disabled && styles.disabled,
         ]}>
-        <Text style={[styles.value, !value && styles.placeholder]}>{display}</Text>
+        <Text numberOfLines={1} style={[styles.value, !value && styles.placeholder]}>
+          {display}
+        </Text>
         <Text accessibilityElementsHidden style={styles.glyph}>
           {mode === 'time' ? '◷' : '▣'}
         </Text>
@@ -263,36 +265,66 @@ export function DateTimeField({
         </Text>
       ) : null}
 
-      {Platform.OS === 'ios' && iosOpen ? (
-        <View style={styles.iosPanel}>
-          <Text style={styles.iosTitle}>
-            {mode === 'datetime' && iosStep === 'date'
-              ? 'Escolha a data'
-              : mode === 'datetime'
-                ? 'Agora escolha o horário'
-                : mode === 'date'
+      {Platform.OS === 'ios' ? (
+        <Modal
+          animationType="fade"
+          onRequestClose={() => setIosOpen(false)}
+          presentationStyle="overFullScreen"
+          transparent
+          visible={iosOpen}>
+          <View style={styles.iosModalRoot}>
+            <Pressable
+              accessibilityLabel="Fechar seletor"
+              accessibilityRole="button"
+              onPress={() => setIosOpen(false)}
+              style={StyleSheet.absoluteFill}
+            />
+            <View accessibilityViewIsModal style={styles.iosPanel}>
+              <Text style={styles.iosTitle}>
+                {mode === 'datetime' && iosStep === 'date'
                   ? 'Escolha a data'
-                  : 'Escolha o horário'}
-          </Text>
-          <DateTimePicker
-            display={iosStep === 'date' ? 'inline' : 'spinner'}
-            maximumDate={iosStep === 'date' ? maximumDate : undefined}
-            minimumDate={iosStep === 'date' ? minimumDate : undefined}
-            mode={iosStep}
-            value={iosDraft}
-            onChange={handleIosChange}
-          />
-          <View style={styles.iosActions}>
-            <Pressable onPress={() => setIosOpen(false)} style={styles.iosAction}>
-              <Text style={styles.iosCancel}>Cancelar</Text>
-            </Pressable>
-            <Pressable onPress={confirmIos} style={[styles.iosAction, styles.iosActionPrimary]}>
-              <Text style={styles.iosConfirm}>
-                {mode === 'datetime' && iosStep === 'date' ? 'Escolher horário' : 'Concluir'}
+                  : mode === 'datetime'
+                    ? 'Agora escolha o horário'
+                    : mode === 'date'
+                      ? 'Escolha a data'
+                      : 'Escolha o horário'}
               </Text>
-            </Pressable>
+              <DateTimePicker
+                display={iosStep === 'date' ? 'inline' : 'spinner'}
+                maximumDate={iosStep === 'date' ? maximumDate : undefined}
+                minimumDate={iosStep === 'date' ? minimumDate : undefined}
+                mode={iosStep}
+                style={styles.iosPicker}
+                value={iosDraft}
+                onChange={handleIosChange}
+              />
+              <View style={styles.iosActions}>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => setIosOpen(false)}
+                  style={({ pressed }) => [
+                    styles.iosAction,
+                    styles.iosActionSecondary,
+                    pressed && styles.iosActionPressed,
+                  ]}>
+                  <Text style={styles.iosCancel}>Cancelar</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={confirmIos}
+                  style={({ pressed }) => [
+                    styles.iosAction,
+                    styles.iosActionPrimary,
+                    pressed && styles.iosActionPressed,
+                  ]}>
+                  <Text style={styles.iosConfirm}>
+                    {mode === 'datetime' && iosStep === 'date' ? 'Escolher horário' : 'Concluir'}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
           </View>
-        </View>
+        </Modal>
       ) : null}
     </View>
   );
@@ -300,6 +332,8 @@ export function DateTimeField({
 
 const styles = StyleSheet.create({
   container: {
+    width: '100%',
+    minWidth: 0,
     gap: spacing.sm,
   },
   label: {
@@ -311,6 +345,8 @@ const styles = StyleSheet.create({
     color: colors.error,
   },
   field: {
+    width: '100%',
+    minWidth: 0,
     minHeight: 52,
     paddingHorizontal: spacing.lg,
     borderWidth: 1,
@@ -333,6 +369,7 @@ const styles = StyleSheet.create({
   },
   value: {
     flex: 1,
+    minWidth: 0,
     color: colors.text,
     fontSize: 16,
   },
@@ -340,6 +377,7 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
   glyph: {
+    flexShrink: 0,
     color: colors.primary,
     fontSize: 20,
     fontWeight: '900',
@@ -353,42 +391,72 @@ const styles = StyleSheet.create({
     color: colors.error,
     fontSize: 13,
   },
+  iosModalRoot: {
+    flex: 1,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xxl,
+    backgroundColor: 'rgba(0, 0, 0, 0.34)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   iosPanel: {
-    padding: spacing.md,
+    width: '100%',
+    maxWidth: 420,
+    padding: spacing.lg,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radii.lg,
     backgroundColor: colors.surface,
-    gap: spacing.sm,
+    gap: spacing.md,
+    overflow: 'hidden',
   },
   iosTitle: {
     color: colors.text,
-    fontSize: 15,
+    fontSize: 17,
     fontWeight: '900',
+    textAlign: 'center',
+  },
+  iosPicker: {
+    width: '100%',
+    alignSelf: 'center',
   },
   iosActions: {
+    width: '100%',
+    minWidth: 0,
     flexDirection: 'row',
-    justifyContent: 'flex-end',
+    alignItems: 'stretch',
     gap: spacing.sm,
   },
   iosAction: {
-    minHeight: 42,
-    paddingHorizontal: spacing.md,
+    flex: 1,
+    minWidth: 0,
+    minHeight: 46,
+    paddingHorizontal: spacing.sm,
     borderRadius: radii.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  iosActionSecondary: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
+  },
   iosActionPrimary: {
     backgroundColor: colors.primary,
   },
+  iosActionPressed: {
+    opacity: 0.72,
+  },
   iosCancel: {
-    color: colors.textMuted,
-    fontSize: 13,
+    color: colors.text,
+    fontSize: 14,
     fontWeight: '800',
+    textAlign: 'center',
   },
   iosConfirm: {
     color: colors.surface,
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '900',
+    textAlign: 'center',
   },
 });
