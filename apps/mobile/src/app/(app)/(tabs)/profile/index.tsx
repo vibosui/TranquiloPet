@@ -108,6 +108,14 @@ export default function ProfileOverviewScreen() {
         />
       </SectionCard>
 
+      {profile.caregiver_enabled ? (
+        <SectionCard
+          title="Disponibilidade como cuidador"
+          description="Defina quais planos você oferece, em quais dias está disponível, sua janela de recebimento/entrega e se aceita estadias acima de 24 horas.">
+          <PrimaryButton label="Configurar planos e disponibilidade" onPress={() => router.push('/profile/caregiving')} />
+        </SectionCard>
+      ) : null}
+
       <SectionCard title="Dados da conta">
         <ProfileRow label="Nome" value={profile.full_name || 'Não informado'} />
         <ProfileRow label="E-mail" value={user.email || 'Não informado'} />

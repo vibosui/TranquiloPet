@@ -146,7 +146,7 @@ export default function ContactsScreen() {
 
       <SectionCard
         title="Meus contatos"
-        description="As hospedagens e chats ficarão agrupados por cada pessoa.">
+        description="As conexões permanecem úteis para histórico e futuras hospedagens, mas uma nova busca sempre começa pelo plano.">
         {loading ? (
           <View style={styles.loading}>
             <ActivityIndicator color={colors.primary} />
@@ -180,11 +180,11 @@ export default function ContactsScreen() {
                     onPress={() =>
                       router.push({
                         pathname: '/hosting/new',
-                        params: { connectionId: connection.id },
+                        params: { caregiverId: profile?.id },
                       })
                     }
                     style={({ pressed }) => [styles.hostingButton, pressed && styles.pressed]}>
-                    <Text style={styles.hostingButtonText}>Criar hospedagem com este cuidador</Text>
+                    <Text style={styles.hostingButtonText}>Ver disponibilidade deste cuidador</Text>
                     <Text style={styles.hostingArrow}>›</Text>
                   </Pressable>
                 ) : null}

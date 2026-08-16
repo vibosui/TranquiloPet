@@ -16,6 +16,7 @@ import { DateTimeField, parsePickerValue } from '@/components/date-time-field';
 import { ErrorBanner } from '@/components/error-banner';
 import { IncidentControls } from '@/components/incident-controls';
 import { MediatedChatControls } from '@/components/mediated-chat-controls';
+import { PlanCareControls } from '@/components/plan-care-controls';
 import { FormField } from '@/components/form-field';
 import { PetSnapshotModal } from '@/components/pet-snapshot-modal';
 import { PhotoLightbox } from '@/components/photo-lightbox';
@@ -25,6 +26,7 @@ import { SecondaryButton } from '@/components/secondary-button';
 import { SectionCard } from '@/components/section-card';
 import { useAuth, type HospedaProfile } from '@/core/auth/auth-context';
 import { supabase } from '@/core/supabase/client';
+import { planName } from '@/features/hosting/plans';
 import { colors, radii, spacing } from '@/theme/tokens';
 
 type HostingStatus = 'draft' | 'sent' | 'accepted' | 'in_progress' | 'completed' | 'cancelled';
@@ -48,6 +50,8 @@ type EventPet = {
   pet_id: string;
   pet_snapshot: unknown;
   handoff_snapshot: unknown;
+  plan_code: string;
+  plan_snapshot: unknown;
 };
 
 type EventTask = {
@@ -62,6 +66,8 @@ type EventTask = {
   sort_order: number;
   completed_at: string | null;
   completed_by: string | null;
+  source: 'custom' | 'photo_request' | 'plan_activity';
+  plan_period_id: string | null;
 };
 
 type ChatMessage = {
@@ -206,7 +212,7 @@ export default function HostingEventScreen() {
       supabase.rpc('get_event_pets', { p_event_id: eventId }),
       supabase
         .from('event_tasks')
-        .select('id, event_id, pet_id, category, title, instructions, due_at, requires_photo, sort_order, completed_at, completed_by')
+        .select('id, event_id, pet_id, category, title, instructions, due_at, requires_photo, sort_order, completed_at, completed_by, source, plan_period_id')
         .eq('event_id', eventId)
         .order('due_at', { ascending: true, nullsFirst: false })
         .order('sort_order', { ascending: true }),
@@ -313,6 +319,11 @@ export default function HostingEventScreen() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'chat_messages', filter: `event_id=eq.${eventId}` },
+        refresh,
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'event_plan_media', filter: `event_id=eq.${eventId}` },
         refresh,
       )
       .subscribe();
@@ -502,6 +513,8 @@ export default function HostingEventScreen() {
       const normalized = transitionError.message.toLowerCase();
       if (normalized.includes('unfinished')) {
         setError('Ainda existem tarefas pendentes no checklist.');
+      } else if (normalized.includes('plan obligations')) {
+        setError('Ainda faltam fotos, vídeos ou a atividade obrigatória previstos no plano de um dos pets.');
       } else {
         setError('Esta mudança de estado não é permitida agora.');
       }
@@ -655,7 +668,7 @@ export default function HostingEventScreen() {
                 <Text style={styles.snapshotEmoji}>🐾</Text>
                 <View style={styles.snapshotCopy}>
                   <Text style={styles.snapshotName}>{petNameFromSnapshot(eventPet.pet_snapshot)}</Text>
-                  <Text style={styles.snapshotHint}>Ver todas as informações do pet</Text>
+                  <Text style={styles.snapshotHint}>${planName(eventPet.plan_code)} • Ver todas as informações do pet</Text>
                 </View>
                 <View style={styles.snapshotAction}>
                   <Text style={styles.snapshotBadge}>SNAPSHOT</Text>
@@ -886,6 +899,18 @@ export default function HostingEventScreen() {
         ) : null}
 
         <SectionCard
+          title="Acompanhamento do plano"
+          description="Os mínimos são controlados por pet e por períodos consecutivos de até 24 horas. Fotos de tarefas e solicitações do tutor também contam para o mínimo contratado.">
+          <PlanCareControls
+            eventId={event.id}
+            eventStatus={event.status}
+            isCaregiver={isCaregiver}
+            pets={eventPets}
+            onChanged={() => loadEvent(false)}
+          />
+        </SectionCard>
+
+        <SectionCard
           title="Checklist"
           description={tasks.length ? `${completedTasks} de ${tasks.length} concluída(s).` : 'Nenhuma tarefa foi adicionada.'}>
           <View style={styles.taskList}>
@@ -902,10 +927,12 @@ export default function HostingEventScreen() {
                   <Text style={styles.taskCheck}>{task.completed_at ? '✓' : '○'}</Text>
                 </View>
 
-                {isTutor && event.status === 'draft' ? (
+                {isTutor && event.status === 'draft' && task.source === 'custom' ? (
                   <Pressable accessibilityRole="button" onPress={() => void deleteTask(task.id)}>
                     <Text style={styles.removeTask}>Remover tarefa</Text>
                   </Pressable>
+                ) : task.source === 'plan_activity' ? (
+                  <Text style={styles.planTaskBadge}>OBRIGATÓRIO PELO PLANO</Text>
                 ) : null}
 
                 {isCaregiver && event.status === 'in_progress' && !task.completed_at ? (
@@ -1414,6 +1441,13 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontSize: 23,
     fontWeight: '900',
+  },
+  planTaskBadge: {
+    alignSelf: 'flex-start',
+    color: colors.primary,
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.6,
   },
   removeTask: {
     color: colors.error,

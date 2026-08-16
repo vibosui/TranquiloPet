@@ -68,9 +68,9 @@ export default function HomeScreen() {
         <Text style={styles.heroKicker}>CUIDADO QUE ACOLHE</Text>
         <Text style={styles.heroTitle}>Transparência durante toda a hospedagem.</Text>
         <Text style={styles.heroText}>
-          Rotina, checklist, fotos e conversa ficam ligados ao mesmo evento para tutor e cuidador saberem exatamente o que aconteceu.
+          Rotina, checklist, fotos e comunicação mediada ficam ligados ao mesmo evento para tutor e cuidador saberem exatamente o que aconteceu.
         </Text>
-        <PrimaryButton label="Adicionar contato" onPress={() => router.push('/contacts')} />
+        <PrimaryButton label="Encontrar cuidador" onPress={() => router.push('/hosting/new')} />
       </View>
 
       <View style={styles.metrics}>
@@ -95,7 +95,7 @@ export default function HomeScreen() {
 
       <SectionCard
         title="O que você quer fazer?"
-        description="O MVP agora parte da relação entre duas pessoas e do evento de hospedagem.">
+        description="Para uma nova hospedagem, escolha primeiro o nível de acompanhamento e o período. Depois mostramos cuidadores compatíveis.">
         <ActionCard
           title="Hospedagens"
           description="Veja eventos atuais e o histórico de cuidados."
