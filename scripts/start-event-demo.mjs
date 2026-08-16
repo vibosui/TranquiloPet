@@ -7,10 +7,14 @@ import QRCode from 'qrcode';
 const port = Number(process.env.HOSPEDA_PATAS_EVENT_PORT || 8081);
 const forcedHost = process.env.HOSPEDA_PATAS_EVENT_HOST?.trim();
 const qrOnly = process.env.HOSPEDA_PATAS_EVENT_QR_ONLY === '1';
-const tunnelRetries = 2;
+const quickTunnelTimeoutMs = Number(process.env.HOSPEDA_PATAS_TUNNEL_TIMEOUT_MS || 90000);
 
 if (!Number.isInteger(port) || port < 1024 || port > 65535) {
   throw new Error('HOSPEDA_PATAS_EVENT_PORT precisa ser uma porta válida entre 1024 e 65535.');
+}
+
+if (!Number.isInteger(quickTunnelTimeoutMs) || quickTunnelTimeoutMs < 15000) {
+  throw new Error('HOSPEDA_PATAS_TUNNEL_TIMEOUT_MS precisa ser de pelo menos 15000 ms.');
 }
 
 function isPrivateIPv4(address) {
@@ -68,49 +72,121 @@ function chooseLanAddress() {
   return candidates[0].address;
 }
 
-function startExpo(connectionMode) {
+function stripAnsi(value) {
+  return value.replace(/\u001b\[[0-9;]*m/g, '');
+}
+
+function spawnCrossPlatform(command, args, options = {}) {
+  if (process.platform === 'win32') {
+    const commandProcessor = process.env.ComSpec || process.env.COMSPEC || 'cmd.exe';
+    const quoted = [command, ...args]
+      .map((part) => (/\s/.test(part) ? `"${part.replaceAll('"', '\\"')}"` : part))
+      .join(' ');
+    return spawn(commandProcessor, ['/d', '/s', '/c', quoted], options);
+  }
+  return spawn(command, args, options);
+}
+
+function startCloudflareQuickTunnel() {
+  const localUrl = `http://127.0.0.1:${port}`;
+  return spawnCrossPlatform(
+    process.platform === 'win32' ? 'npx.cmd' : 'npx',
+    ['--yes', 'wrangler@latest', 'tunnel', 'quick-start', localUrl],
+    {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        NO_COLOR: '1',
+      },
+    },
+  );
+}
+
+function waitForPublicTunnel(child) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    let settled = false;
+    let buffer = '';
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill('SIGTERM');
+      rejectPromise(
+        new Error(
+          `Cloudflare Quick Tunnel não publicou uma URL em ${Math.round(quickTunnelTimeoutMs / 1000)} s.`,
+        ),
+      );
+    }, quickTunnelTimeoutMs);
+
+    const inspect = (chunk, target) => {
+      const text = chunk.toString();
+      target.write(text);
+      buffer = `${buffer}${stripAnsi(text)}`.slice(-12000);
+      const match = buffer.match(/https:\/\/[a-z0-9-]+\.(?:trycloudflare\.com|trycloudflare\.app)/i);
+      if (!match || settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolvePromise(match[0]);
+    };
+
+    child.stdout?.on('data', (chunk) => inspect(chunk, process.stdout));
+    child.stderr?.on('data', (chunk) => inspect(chunk, process.stderr));
+
+    child.once('error', (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      rejectPromise(error);
+    });
+
+    child.once('exit', (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      rejectPromise(new Error(`Cloudflare Quick Tunnel encerrou antes de publicar a URL (código ${code ?? 'desconhecido'}).`));
+    });
+  });
+}
+
+function startExpo(publicTunnelUrl) {
   const npmArgs = [
     'run',
     'start',
     '--workspace=@hospeda-patas/mobile',
     '--',
-    `--${connectionMode}`,
+    '--localhost',
     '--port',
     String(port),
   ];
 
-  const options = {
-    stdio: 'inherit',
+  return spawnCrossPlatform(process.platform === 'win32' ? 'npm.cmd' : 'npm', npmArgs, {
+    stdio: ['inherit', 'pipe', 'pipe'],
     env: {
       ...process.env,
       EXPO_NO_TELEMETRY: process.env.EXPO_NO_TELEMETRY || '1',
+      EXPO_PACKAGER_PROXY_URL: publicTunnelUrl,
     },
-  };
-
-  if (process.platform === 'win32') {
-    const commandProcessor = process.env.ComSpec || process.env.COMSPEC || 'cmd.exe';
-    const command = ['npm.cmd', ...npmArgs].join(' ');
-    return spawn(commandProcessor, ['/d', '/s', '/c', command], options);
-  }
-
-  return spawn('npm', npmArgs, options);
+  });
 }
 
 const host = forcedHost || chooseLanAddress();
 const demoUrl = `http://${host}:${port}/demo`;
 const outputDirectory = resolve('artifacts', 'event');
-const qrPath = resolve(outputDirectory, 'hospeda-patas-demo-qr.png');
-const urlPath = resolve(outputDirectory, 'hospeda-patas-demo-url.txt');
+const demoQrPath = resolve(outputDirectory, 'hospeda-patas-demo-qr.png');
+const demoUrlPath = resolve(outputDirectory, 'hospeda-patas-demo-url.txt');
+const appQrPath = resolve(outputDirectory, 'hospeda-patas-app-qr.png');
+const appUrlPath = resolve(outputDirectory, 'hospeda-patas-app-url.txt');
+const tunnelUrlPath = resolve(outputDirectory, 'hospeda-patas-tunnel-url.txt');
 
 await mkdir(outputDirectory, { recursive: true });
-await QRCode.toFile(qrPath, demoUrl, {
+await QRCode.toFile(demoQrPath, demoUrl, {
   width: 1600,
   margin: 4,
   errorCorrectionLevel: 'H',
 });
-await writeFile(urlPath, `${demoUrl}\n`, 'utf8');
+await writeFile(demoUrlPath, `${demoUrl}\n`, 'utf8');
 
-const terminalQr = await QRCode.toString(demoUrl, {
+const terminalDemoQr = await QRCode.toString(demoUrl, {
   type: 'terminal',
   small: true,
   errorCorrectionLevel: 'M',
@@ -119,84 +195,119 @@ const terminalQr = await QRCode.toString(demoUrl, {
 console.log('\n============================================================');
 console.log(' HOSPEDA PATAS — MODO EVENTO');
 console.log('============================================================');
-console.log('\nQR DO PÚBLICO — abre no navegador, sem Expo Go e sem login:');
-console.log(terminalQr);
-console.log(`URL: ${demoUrl}`);
-console.log(`PNG para a apresentação: ${qrPath}`);
-console.log(`URL salva em: ${urlPath}`);
+console.log('\nQR DEMO WEB — abre /demo no navegador pela rede local:');
+console.log(terminalDemoQr);
+console.log(`URL demo: ${demoUrl}`);
+console.log(`PNG demo: ${demoQrPath}`);
 
 if (qrOnly) {
-  console.log('\nQR gerado em modo de validação. O servidor Expo não será iniciado.');
+  console.log('\nQR gerado em modo de validação. Tunnel e Expo não serão iniciados.');
   process.exit(0);
 }
 
-console.log('\nO Expo exibirá abaixo o segundo QR, destinado ao Expo Go/teste técnico.');
-console.log('O app técnico tentará TUNNEL primeiro e cairá para LAN automaticamente se o ngrok falhar.');
-console.log('Mantenha este terminal aberto durante a apresentação.');
-console.log('IMPORTANTE: o QR público /demo sempre depende da LAN.\n');
+console.log('\n============================================================');
+console.log(' APP REAL — ACESSO EXTERNO');
+console.log('============================================================');
+console.log('Criando Cloudflare Quick Tunnel para o Metro...');
+console.log('Esse endereço funciona pela internet; o celular não precisa estar na mesma rede do notebook.\n');
 
-let child = null;
+let tunnelChild = null;
+let expoChild = null;
 let stopping = false;
-let tunnelAttempt = 0;
+let appQrWritten = false;
 
-function launch(connectionMode) {
-  if (connectionMode === 'tunnel') {
-    tunnelAttempt += 1;
-    console.log(`\nTentativa ${tunnelAttempt}/${tunnelRetries} de iniciar o Expo por TUNNEL...\n`);
-  } else {
-    console.log('\n⚠️  Tunnel indisponível. Iniciando o QR técnico por LAN como fallback.');
-    console.log(`Os aparelhos precisam alcançar o notebook ${host} pela rede local.\n`);
-  }
+try {
+  tunnelChild = startCloudflareQuickTunnel();
+  const publicTunnelUrl = await waitForPublicTunnel(tunnelChild);
+  await writeFile(tunnelUrlPath, `${publicTunnelUrl}\n`, 'utf8');
 
-  child = startExpo(connectionMode);
+  console.log('\n✅ Tunnel público criado.');
+  console.log(`Tunnel: ${publicTunnelUrl}`);
+  console.log('Iniciando o Expo com esse tunnel como endereço público do APP REAL...\n');
 
-  child.once('error', (error) => {
-    console.error(`\nNão foi possível iniciar o Expo por ${connectionMode.toUpperCase()}.`);
+  expoChild = startExpo(publicTunnelUrl);
+
+  const inspectExpoOutput = async (chunk, target) => {
+    const text = chunk.toString();
+    target.write(text);
+    if (appQrWritten) return;
+
+    const clean = stripAnsi(text);
+    const match = clean.match(/\b(?:exps?|exp):\/\/[^\s]+/i);
+    if (!match) return;
+
+    const appUrl = match[0].replace(/[),.;]+$/, '');
+    appQrWritten = true;
+    await QRCode.toFile(appQrPath, appUrl, {
+      width: 1600,
+      margin: 4,
+      errorCorrectionLevel: 'H',
+    });
+    await writeFile(appUrlPath, `${appUrl}\n`, 'utf8');
+
+    const terminalAppQr = await QRCode.toString(appUrl, {
+      type: 'terminal',
+      small: true,
+      errorCorrectionLevel: 'M',
+    });
+
+    console.log('\n============================================================');
+    console.log(' QR APP REAL — EXPO GO / INTERNET');
+    console.log('============================================================');
+    console.log(terminalAppQr);
+    console.log(`URL Expo: ${appUrl}`);
+    console.log(`PNG do app para teste/apresentação: ${appQrPath}`);
+    console.log('Esse QR abre o aplicativo real e usa os usuários/dados reais do Supabase.');
+    console.log('Pode ser aberto em outra Wi-Fi ou no 4G/5G enquanto este terminal estiver rodando.\n');
+  };
+
+  expoChild.stdout?.on('data', (chunk) => {
+    void inspectExpoOutput(chunk, process.stdout);
+  });
+  expoChild.stderr?.on('data', (chunk) => {
+    void inspectExpoOutput(chunk, process.stderr);
+  });
+
+  expoChild.once('error', (error) => {
+    console.error('\nNão foi possível iniciar o Expo.');
     console.error(error);
-    handleFailedLaunch(connectionMode);
+    stopAll('SIGTERM');
+    process.exitCode = 1;
   });
 
-  child.once('exit', (code, signal) => {
-    if (stopping || signal) {
-      process.exit(0);
-      return;
-    }
-
-    if ((code ?? 0) === 0) {
-      process.exit(0);
-      return;
-    }
-
-    handleFailedLaunch(connectionMode);
+  expoChild.once('exit', (code, signal) => {
+    if (stopping || signal) return;
+    console.error(`\nExpo encerrou (código ${code ?? 'desconhecido'}). Encerrando o tunnel.`);
+    stopAll('SIGTERM');
+    process.exitCode = code ?? 1;
   });
-}
 
-function handleFailedLaunch(connectionMode) {
-  if (stopping) return;
-
-  if (connectionMode === 'tunnel' && tunnelAttempt < tunnelRetries) {
-    console.warn('\nTunnel falhou. Nova tentativa em 2 segundos...');
-    setTimeout(() => launch('tunnel'), 2000);
-    return;
-  }
-
-  if (connectionMode === 'tunnel') {
-    console.warn('\nAs tentativas de tunnel falharam. Ativando fallback LAN automaticamente.');
-    setTimeout(() => launch('lan'), 1000);
-    return;
-  }
-
-  console.error('\nTambém não foi possível iniciar o Expo por LAN.');
+  tunnelChild.once('exit', (code, signal) => {
+    if (stopping || signal) return;
+    console.error(`\nCloudflare Tunnel encerrou (código ${code ?? 'desconhecido'}). Encerrando o Expo.`);
+    stopAll('SIGTERM');
+    process.exitCode = code ?? 1;
+  });
+} catch (error) {
+  console.error('\n❌ Não foi possível publicar o app pela internet.');
+  console.error(error instanceof Error ? error.message : error);
+  console.error('\nO app NÃO será rebaixado silenciosamente para LAN: este modo precisa garantir acesso externo.');
+  if (tunnelChild && !tunnelChild.killed) tunnelChild.kill('SIGTERM');
   process.exitCode = 1;
 }
 
-function stop(signal) {
+function stopAll(signal) {
+  if (stopping) return;
   stopping = true;
-  if (child && !child.killed) child.kill(signal);
-  else process.exit(0);
+  if (expoChild && !expoChild.killed) expoChild.kill(signal);
+  if (tunnelChild && !tunnelChild.killed) tunnelChild.kill(signal);
 }
 
-process.on('SIGINT', () => stop('SIGINT'));
-process.on('SIGTERM', () => stop('SIGTERM'));
-
-launch('tunnel');
+process.on('SIGINT', () => {
+  stopAll('SIGINT');
+  setTimeout(() => process.exit(0), 250);
+});
+process.on('SIGTERM', () => {
+  stopAll('SIGTERM');
+  setTimeout(() => process.exit(0), 250);
+});
