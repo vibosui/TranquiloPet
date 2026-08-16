@@ -73,7 +73,7 @@ function startExpo() {
     'start',
     '--workspace=@hospeda-patas/mobile',
     '--',
-    '--lan',
+    '--tunnel',
     '--port',
     String(port),
   ];
@@ -130,8 +130,9 @@ if (qrOnly) {
 }
 
 console.log('\nO Expo exibirá abaixo o segundo QR, destinado ao Expo Go/teste técnico.');
+console.log('O app técnico será servido por TUNNEL para não depender da comunicação direta pela LAN.');
 console.log('Mantenha este terminal aberto durante a apresentação.');
-console.log('IMPORTANTE: os celulares precisam alcançar este notebook pela rede local.\n');
+console.log('IMPORTANTE: somente o QR público /demo depende de os celulares alcançarem este notebook pela rede local.\n');
 
 const child = startExpo();
 
