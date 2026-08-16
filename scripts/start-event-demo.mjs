@@ -7,6 +7,7 @@ import QRCode from 'qrcode';
 const port = Number(process.env.HOSPEDA_PATAS_EVENT_PORT || 8081);
 const forcedHost = process.env.HOSPEDA_PATAS_EVENT_HOST?.trim();
 const qrOnly = process.env.HOSPEDA_PATAS_EVENT_QR_ONLY === '1';
+const tunnelRetries = 2;
 
 if (!Number.isInteger(port) || port < 1024 || port > 65535) {
   throw new Error('HOSPEDA_PATAS_EVENT_PORT precisa ser uma porta válida entre 1024 e 65535.');
@@ -67,13 +68,13 @@ function chooseLanAddress() {
   return candidates[0].address;
 }
 
-function startExpo() {
+function startExpo(connectionMode) {
   const npmArgs = [
     'run',
     'start',
     '--workspace=@hospeda-patas/mobile',
     '--',
-    '--tunnel',
+    `--${connectionMode}`,
     '--port',
     String(port),
   ];
@@ -130,26 +131,72 @@ if (qrOnly) {
 }
 
 console.log('\nO Expo exibirá abaixo o segundo QR, destinado ao Expo Go/teste técnico.');
-console.log('O app técnico será servido por TUNNEL para não depender da comunicação direta pela LAN.');
+console.log('O app técnico tentará TUNNEL primeiro e cairá para LAN automaticamente se o ngrok falhar.');
 console.log('Mantenha este terminal aberto durante a apresentação.');
-console.log('IMPORTANTE: somente o QR público /demo depende de os celulares alcançarem este notebook pela rede local.\n');
+console.log('IMPORTANTE: o QR público /demo sempre depende da LAN.\n');
 
-const child = startExpo();
+let child = null;
+let stopping = false;
+let tunnelAttempt = 0;
 
-child.on('error', (error) => {
-  console.error('\nNão foi possível iniciar o Expo no modo evento.');
-  console.error(error);
+function launch(connectionMode) {
+  if (connectionMode === 'tunnel') {
+    tunnelAttempt += 1;
+    console.log(`\nTentativa ${tunnelAttempt}/${tunnelRetries} de iniciar o Expo por TUNNEL...\n`);
+  } else {
+    console.log('\n⚠️  Tunnel indisponível. Iniciando o QR técnico por LAN como fallback.');
+    console.log(`Os aparelhos precisam alcançar o notebook ${host} pela rede local.\n`);
+  }
+
+  child = startExpo(connectionMode);
+
+  child.once('error', (error) => {
+    console.error(`\nNão foi possível iniciar o Expo por ${connectionMode.toUpperCase()}.`);
+    console.error(error);
+    handleFailedLaunch(connectionMode);
+  });
+
+  child.once('exit', (code, signal) => {
+    if (stopping || signal) {
+      process.exit(0);
+      return;
+    }
+
+    if ((code ?? 0) === 0) {
+      process.exit(0);
+      return;
+    }
+
+    handleFailedLaunch(connectionMode);
+  });
+}
+
+function handleFailedLaunch(connectionMode) {
+  if (stopping) return;
+
+  if (connectionMode === 'tunnel' && tunnelAttempt < tunnelRetries) {
+    console.warn('\nTunnel falhou. Nova tentativa em 2 segundos...');
+    setTimeout(() => launch('tunnel'), 2000);
+    return;
+  }
+
+  if (connectionMode === 'tunnel') {
+    console.warn('\nAs tentativas de tunnel falharam. Ativando fallback LAN automaticamente.');
+    setTimeout(() => launch('lan'), 1000);
+    return;
+  }
+
+  console.error('\nTambém não foi possível iniciar o Expo por LAN.');
   process.exitCode = 1;
-});
+}
 
 function stop(signal) {
-  if (!child.killed) child.kill(signal);
+  stopping = true;
+  if (child && !child.killed) child.kill(signal);
+  else process.exit(0);
 }
 
 process.on('SIGINT', () => stop('SIGINT'));
 process.on('SIGTERM', () => stop('SIGTERM'));
 
-child.on('exit', (code, signal) => {
-  if (signal) process.exit(0);
-  process.exit(code ?? 0);
-});
+launch('tunnel');
