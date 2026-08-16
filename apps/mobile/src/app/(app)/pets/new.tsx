@@ -1,7 +1,8 @@
 import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { DateTimeField, parsePickerValue } from '@/components/date-time-field';
 import { ErrorBanner } from '@/components/error-banner';
 import { FormField } from '@/components/form-field';
 import { PrimaryButton } from '@/components/primary-button';
@@ -26,6 +27,8 @@ type Draft = {
   identificationNotes: string;
 };
 
+type FieldErrors = Partial<Record<'name' | 'birthDate' | 'weight', string>>;
+
 const initialDraft: Draft = {
   name: '',
   species: 'dog',
@@ -41,6 +44,7 @@ export default function NewPetScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const [draft, setDraft] = useState(initialDraft);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -51,21 +55,29 @@ export default function NewPetScreen() {
 
   function update<K extends keyof Draft>(field: K, value: Draft[K]) {
     setDraft((current) => ({ ...current, [field]: value }));
+    if (field === 'name' || field === 'birthDate' || field === 'weight') {
+      setFieldErrors((current) => ({ ...current, [field]: undefined }));
+    }
     setError(null);
   }
 
   async function handleSubmit() {
     if (!user || submitting) return;
-    if (draft.name.trim().length < 2) {
-      setError('Informe o nome do pet.');
-      return;
-    }
-    if (draft.birthDate && !/^\d{4}-\d{2}-\d{2}$/.test(draft.birthDate)) {
-      setError('Use a data de nascimento no formato AAAA-MM-DD.');
-      return;
+
+    const nextErrors: FieldErrors = {};
+    if (draft.name.trim().length < 2) nextErrors.name = 'Informe o nome do pet.';
+    if (draft.birthDate && !parsePickerValue(draft.birthDate, 'date')) {
+      nextErrors.birthDate = 'Selecione uma data de nascimento válida.';
     }
     if (draft.weight.trim() && normalizedWeight === null) {
-      setError('Informe um peso aproximado válido.');
+      nextErrors.weight = 'Informe um peso aproximado válido.';
+    }
+
+    setFieldErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      const firstMessage = Object.values(nextErrors).find(Boolean) ?? 'Revise os campos destacados.';
+      setError('Existem informações obrigatórias ou inválidas no formulário.');
+      Alert.alert('Revise o cadastro do pet', firstMessage);
       return;
     }
 
@@ -78,12 +90,14 @@ export default function NewPetScreen() {
       water: {},
       walks: {},
       routine: {},
+      hygiene: {},
       objects: {},
       health: {},
+      preventive_care: {},
       medications: [],
       emergency: {},
       additional_notes: '',
-      dossier_version: 1,
+      dossier_version: 3,
     };
 
     const { error: insertError } = await supabase.from('pets').insert({
@@ -105,7 +119,10 @@ export default function NewPetScreen() {
       return;
     }
 
-    router.replace('/pets');
+    setSubmitting(false);
+    Alert.alert('Pet cadastrado', 'A identificação foi salva. Agora você pode completar o dossiê.', [
+      { text: 'Continuar', onPress: () => router.replace('/pets') },
+    ]);
   }
 
   return (
@@ -123,6 +140,7 @@ export default function NewPetScreen() {
           autoCapitalize="words"
           maxLength={80}
           value={draft.name}
+          error={fieldErrors.name}
           onChangeText={(value) => update('name', value)}
         />
 
@@ -156,14 +174,15 @@ export default function NewPetScreen() {
           onChange={(value) => update('sex', value as Sex)}
         />
 
-        <FormField
+        <DateTimeField
           label="Data de nascimento"
-          hint="Formato: AAAA-MM-DD. Pode deixar em branco se não souber."
-          keyboardType="numbers-and-punctuation"
-          maxLength={10}
-          placeholder="2022-05-14"
+          mode="date"
+          maximumDate={new Date()}
+          hint="Opcional. Toque para escolher pelo calendário."
+          placeholder="Selecionar data"
           value={draft.birthDate}
-          onChangeText={(value) => update('birthDate', value)}
+          error={fieldErrors.birthDate}
+          onChange={(value) => update('birthDate', value)}
         />
 
         <FormField
@@ -171,6 +190,7 @@ export default function NewPetScreen() {
           keyboardType="decimal-pad"
           placeholder="Ex.: 12,5"
           value={draft.weight}
+          error={fieldErrors.weight}
           onChangeText={(value) => update('weight', value)}
         />
 
@@ -198,7 +218,7 @@ export default function NewPetScreen() {
 
       <SectionCard
         title="Próximas seções do dossiê"
-        description="Depois da identificação, vamos completar comportamento, alimentação, água, passeios, rotina, objetos, saúde, medicamentos, emergência, itens enviados e registro de entrega." />
+        description="Depois da identificação, vamos completar comportamento, alimentação, água, passeios, rotina, higiene, objetos, saúde, prevenção, medicamentos e emergência." />
 
       <PrimaryButton
         label="Salvar identificação do pet"
