@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Pressable,
   StyleSheet,
   Switch,
@@ -14,6 +15,8 @@ import {
 import { DateTimeField, parsePickerValue } from '@/components/date-time-field';
 import { ErrorBanner } from '@/components/error-banner';
 import { FormField } from '@/components/form-field';
+import { PetSnapshotModal } from '@/components/pet-snapshot-modal';
+import { PhotoLightbox } from '@/components/photo-lightbox';
 import { PrimaryButton } from '@/components/primary-button';
 import { ScreenShell } from '@/components/screen-shell';
 import { SecondaryButton } from '@/components/secondary-button';
@@ -70,6 +73,11 @@ type ChatMessage = {
   created_at: string;
 };
 
+type EvidenceRow = {
+  id: string;
+  storage_path: string;
+};
+
 type TaskDraft = {
   category: TaskCategory;
   title: string;
@@ -89,6 +97,11 @@ type TaskFieldErrors = {
   title?: string;
   schedule?: string;
   specificCandidate?: string;
+};
+
+type ExpandedPhoto = {
+  uri: string;
+  caption: string | null;
 };
 
 const emptyTaskDraft: TaskDraft = {
@@ -155,6 +168,9 @@ export default function HostingEventScreen() {
   const [eventPets, setEventPets] = useState<EventPet[]>([]);
   const [tasks, setTasks] = useState<EventTask[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [evidenceUrls, setEvidenceUrls] = useState<Map<string, string>>(new Map());
+  const [selectedSnapshot, setSelectedSnapshot] = useState<EventPet | null>(null);
+  const [expandedPhoto, setExpandedPhoto] = useState<ExpandedPhoto | null>(null);
   const [taskDraft, setTaskDraft] = useState<TaskDraft>(emptyTaskDraft);
   const [taskFieldErrors, setTaskFieldErrors] = useState<TaskFieldErrors>({});
   const [messageBody, setMessageBody] = useState('');
@@ -162,9 +178,9 @@ export default function HostingEventScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const loadEvent = useCallback(async () => {
+  const loadEvent = useCallback(async (showLoading = true) => {
     if (!eventId) return;
-    setLoading(true);
+    if (showLoading) setLoading(true);
     setError(null);
 
     const [eventResult, petsResult, tasksResult, messagesResult] = await Promise.all([
@@ -199,20 +215,61 @@ export default function HostingEventScreen() {
     }
 
     const nextEvent = eventResult.data as HostingEvent;
+    const nextMessages = (messagesResult.data ?? []) as ChatMessage[];
     const profileResult = await supabase
       .from('profiles')
       .select('id, public_code, full_name, phone, avatar_path, tutor_enabled, caregiver_enabled, created_at, updated_at')
       .in('id', [nextEvent.tutor_id, nextEvent.caregiver_id]);
 
+    const evidenceIds = Array.from(
+      new Set(
+        nextMessages
+          .map((message) => message.evidence_id)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    );
+
+    let evidenceError = false;
+    const nextEvidenceUrls = new Map<string, string>();
+    if (evidenceIds.length) {
+      const evidenceResult = await supabase
+        .from('task_evidence')
+        .select('id, storage_path')
+        .in('id', evidenceIds);
+
+      if (evidenceResult.error) {
+        evidenceError = true;
+      } else {
+        const entries = await Promise.all(
+          ((evidenceResult.data ?? []) as EvidenceRow[]).map(async (evidence) => {
+            const { data } = await supabase.storage
+              .from('event-evidence')
+              .createSignedUrl(evidence.storage_path, 60 * 60);
+            return [evidence.id, data?.signedUrl ?? ''] as const;
+          }),
+        );
+        entries.forEach(([id, url]) => {
+          if (url) nextEvidenceUrls.set(id, url);
+        });
+      }
+    }
+
     setEvent(nextEvent);
     setEventPets((petsResult.data ?? []) as EventPet[]);
     setTasks((tasksResult.data ?? []) as EventTask[]);
-    setMessages((messagesResult.data ?? []) as ChatMessage[]);
+    setMessages(nextMessages);
+    setEvidenceUrls(nextEvidenceUrls);
     setProfiles(
       new Map(((profileResult.data ?? []) as HospedaProfile[]).map((profile) => [profile.id, profile])),
     );
 
-    if (petsResult.error || tasksResult.error || messagesResult.error || profileResult.error) {
+    if (
+      petsResult.error ||
+      tasksResult.error ||
+      messagesResult.error ||
+      profileResult.error ||
+      evidenceError
+    ) {
       setError('Algumas informações do evento não puderam ser carregadas.');
     }
     setLoading(false);
@@ -221,6 +278,39 @@ export default function HostingEventScreen() {
   useEffect(() => {
     void loadEvent();
   }, [loadEvent]);
+
+  useEffect(() => {
+    if (!eventId) return;
+
+    const refresh = () => void loadEvent(false);
+    const channel = supabase
+      .channel(`hosting-event:${eventId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'hosting_events', filter: `id=eq.${eventId}` },
+        refresh,
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'hosting_event_pets', filter: `event_id=eq.${eventId}` },
+        refresh,
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'event_tasks', filter: `event_id=eq.${eventId}` },
+        refresh,
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'chat_messages', filter: `event_id=eq.${eventId}` },
+        refresh,
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [eventId, loadEvent]);
 
   const isTutor = Boolean(user && event && user.id === event.tutor_id);
   const isCaregiver = Boolean(user && event && user.id === event.caregiver_id);
@@ -273,7 +363,7 @@ export default function HostingEventScreen() {
     setTaskFieldErrors({});
   }
 
-  function scheduledDatesForDraft(): Array<Date | null> {
+  function scheduledDatesForDraft(): (Date | null)[] {
     if (taskDraft.scheduleMode === 'event') return [null];
 
     if (taskDraft.scheduleMode === 'single') {
@@ -376,7 +466,7 @@ export default function HostingEventScreen() {
     } else {
       setTaskDraft(emptyTaskDraft);
       setTaskFieldErrors({});
-      await loadEvent();
+      await loadEvent(false);
     }
     setBusy(false);
   }
@@ -386,7 +476,7 @@ export default function HostingEventScreen() {
     setBusy(true);
     const { error: deleteError } = await supabase.from('event_tasks').delete().eq('id', taskId);
     if (deleteError) setError('Não foi possível remover a tarefa.');
-    else await loadEvent();
+    else await loadEvent(false);
     setBusy(false);
   }
 
@@ -406,7 +496,7 @@ export default function HostingEventScreen() {
         setError('Esta mudança de estado não é permitida agora.');
       }
     } else {
-      await loadEvent();
+      await loadEvent(false);
     }
     setBusy(false);
   }
@@ -424,7 +514,7 @@ export default function HostingEventScreen() {
       p_task_id: task.id,
     });
     if (completionError) setError('Não foi possível concluir esta tarefa.');
-    else await loadEvent();
+    else await loadEvent(false);
     setBusy(false);
   }
 
@@ -442,8 +532,8 @@ export default function HostingEventScreen() {
 
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ['images'],
-        allowsEditing: false,
-        quality: 0.82,
+        allowsEditing: true,
+        quality: 0.86,
         exif: false,
       });
       if (result.canceled || !result.assets[0]?.uri) return;
@@ -488,7 +578,7 @@ export default function HostingEventScreen() {
       });
       if (completionError) throw completionError;
 
-      await loadEvent();
+      await loadEvent(false);
     } catch {
       setError('Não foi possível enviar a foto e concluir a tarefa. Tente novamente.');
     } finally {
@@ -510,7 +600,7 @@ export default function HostingEventScreen() {
       setError('Não foi possível enviar a mensagem.');
     } else {
       setMessageBody('');
-      await loadEvent();
+      await loadEvent(false);
     }
     setBusy(false);
   }
@@ -540,336 +630,372 @@ export default function HostingEventScreen() {
   }
 
   return (
-    <ScreenShell
-      eyebrow="HOSPEDAGEM"
-      onBack={() => router.back()}
-      title={event.title || 'Evento de hospedagem'}
-      subtitle={`${formatDateTime(event.starts_at)} → ${formatDateTime(event.ends_at)}`}>
-      {error ? <ErrorBanner message={error} /> : null}
+    <>
+      <ScreenShell
+        eyebrow="HOSPEDAGEM"
+        onBack={() => router.back()}
+        title={event.title || 'Evento de hospedagem'}
+        subtitle={`${formatDateTime(event.starts_at)} → ${formatDateTime(event.ends_at)}`}>
+        {error ? <ErrorBanner message={error} /> : null}
 
-      <View style={styles.statusCard}>
-        <View style={styles.statusHeader}>
-          <Text style={styles.statusLabel}>{statusLabels[event.status]}</Text>
-          <Text style={styles.statusProgress}>{completedTasks}/{tasks.length} tarefas</Text>
-        </View>
-        <Text style={styles.statusDescription}>{statusCopy[event.status]}</Text>
-        <View style={styles.peopleRow}>
-          <PersonBadge label="Tutor" name={tutor?.full_name || 'Tutor'} />
-          <PersonBadge label="Cuidador" name={caregiver?.full_name || 'Cuidador'} />
-        </View>
-      </View>
-
-      <SectionCard title="Pets neste evento" description="O conteúdo abaixo vem do snapshot criado junto com a hospedagem.">
-        <View style={styles.petList}>
-          {eventPets.map((eventPet) => (
-            <View key={eventPet.pet_id} style={styles.snapshotPet}>
-              <Text style={styles.snapshotEmoji}>🐾</Text>
-              <Text style={styles.snapshotName}>{petNameFromSnapshot(eventPet.pet_snapshot)}</Text>
-              <Text style={styles.snapshotBadge}>SNAPSHOT</Text>
-            </View>
-          ))}
-        </View>
-        {event.tutor_instructions ? <Text style={styles.instructions}>{event.tutor_instructions}</Text> : null}
-      </SectionCard>
-
-      {isTutor && event.status === 'draft' ? (
-        <SectionCard
-          title="Montar checklist"
-          description="Uma tarefa pode ter horário, ser recorrente ou ficar livre para ser concluída quando acontecer durante a hospedagem.">
-          <View style={styles.presets}>
-            <Preset label="📸 Recebimento" onPress={() => applyPreset('arrival')} />
-            <Preset label="🍖 Refeição" onPress={() => applyPreset('meal')} />
-            <Preset label="🦮 Passeio" onPress={() => applyPreset('walk')} />
-            <Preset label="💊 Medicação" onPress={() => applyPreset('medication')} />
-            <Preset label="💧 Água" onPress={() => applyPreset('water')} />
-            <Preset label="＋ Personalizada" onPress={() => applyPreset('custom')} />
+        <View style={styles.statusCard}>
+          <View style={styles.statusHeader}>
+            <Text style={styles.statusLabel}>{statusLabels[event.status]}</Text>
+            <Text style={styles.statusProgress}>{completedTasks}/{tasks.length} tarefas</Text>
           </View>
+          <Text style={styles.statusDescription}>{statusCopy[event.status]}</Text>
+          <View style={styles.peopleRow}>
+            <PersonBadge label="Tutor" name={tutor?.full_name || 'Tutor'} />
+            <PersonBadge label="Cuidador" name={caregiver?.full_name || 'Cuidador'} />
+          </View>
+        </View>
 
-          <FormField
-            label="Tarefa"
-            required
-            value={taskDraft.title}
-            error={taskFieldErrors.title}
-            onChangeText={(title) => {
-              setTaskDraft((current) => ({ ...current, title }));
-              setTaskFieldErrors((current) => ({ ...current, title: undefined }));
-              setError(null);
-            }}
-          />
-          <FormField
-            label="Orientações"
-            multiline
-            value={taskDraft.instructions}
-            onChangeText={(instructions) => setTaskDraft((current) => ({ ...current, instructions }))}
-          />
-
-          <Text style={styles.fieldLabel}>Pet relacionado</Text>
-          <View style={styles.choices}>
-            <ChoiceChip
-              selected={taskDraft.petId === null}
-              label="Todos / geral"
-              onPress={() => setTaskDraft((current) => ({ ...current, petId: null }))}
-            />
-            {eventPets.map((pet) => (
-              <ChoiceChip
-                key={pet.pet_id}
-                selected={taskDraft.petId === pet.pet_id}
-                label={petNameFromSnapshot(pet.pet_snapshot)}
-                onPress={() => setTaskDraft((current) => ({ ...current, petId: pet.pet_id }))}
-              />
+        <SectionCard
+          title="Pets neste evento"
+          description="Toque em um pet para abrir o dossiê completo que foi congelado quando esta hospedagem foi criada.">
+          <View style={styles.petList}>
+            {eventPets.map((eventPet) => (
+              <Pressable
+                key={eventPet.pet_id}
+                accessibilityLabel={`Abrir dossiê congelado de ${petNameFromSnapshot(eventPet.pet_snapshot)}`}
+                accessibilityRole="button"
+                onPress={() => setSelectedSnapshot(eventPet)}
+                style={({ pressed }) => [styles.snapshotPet, pressed && styles.pressed]}>
+                <Text style={styles.snapshotEmoji}>🐾</Text>
+                <View style={styles.snapshotCopy}>
+                  <Text style={styles.snapshotName}>{petNameFromSnapshot(eventPet.pet_snapshot)}</Text>
+                  <Text style={styles.snapshotHint}>Ver todas as informações do pet</Text>
+                </View>
+                <View style={styles.snapshotAction}>
+                  <Text style={styles.snapshotBadge}>SNAPSHOT</Text>
+                  <Text style={styles.snapshotArrow}>›</Text>
+                </View>
+              </Pressable>
             ))}
           </View>
+          {event.tutor_instructions ? <Text style={styles.instructions}>{event.tutor_instructions}</Text> : null}
+        </SectionCard>
 
-          <View style={styles.photoRule}>
-            <View style={styles.photoRuleCopy}>
-              <Text style={styles.photoRuleTitle}>Exigir foto para concluir</Text>
-              <Text style={styles.photoRuleText}>A evidência será registrada no chat do evento.</Text>
+        {isTutor && event.status === 'draft' ? (
+          <SectionCard
+            title="Montar checklist"
+            description="Uma tarefa pode ter horário, ser recorrente ou ficar livre para ser concluída quando acontecer durante a hospedagem.">
+            <View style={styles.presets}>
+              <Preset label="📸 Recebimento" onPress={() => applyPreset('arrival')} />
+              <Preset label="🍖 Refeição" onPress={() => applyPreset('meal')} />
+              <Preset label="🦮 Passeio" onPress={() => applyPreset('walk')} />
+              <Preset label="💊 Medicação" onPress={() => applyPreset('medication')} />
+              <Preset label="💧 Água" onPress={() => applyPreset('water')} />
+              <Preset label="＋ Personalizada" onPress={() => applyPreset('custom')} />
             </View>
-            <Switch
-              trackColor={{ false: colors.border, true: colors.primarySoft }}
-              thumbColor={taskDraft.requiresPhoto ? colors.primary : colors.surface}
-              value={taskDraft.requiresPhoto}
-              onValueChange={(requiresPhoto) => setTaskDraft((current) => ({ ...current, requiresPhoto }))}
-            />
-          </View>
 
-          <Text style={styles.fieldLabel}>Quando esta tarefa deve ser feita?</Text>
-          <View style={styles.choices}>
-            <ChoiceChip
-              selected={taskDraft.scheduleMode === 'event'}
-              label="Quando for realizado"
-              onPress={() => {
-                setTaskDraft((current) => ({ ...current, scheduleMode: 'event' }));
-                setTaskFieldErrors((current) => ({ ...current, schedule: undefined }));
+            <FormField
+              label="Tarefa"
+              required
+              value={taskDraft.title}
+              error={taskFieldErrors.title}
+              onChangeText={(title) => {
+                setTaskDraft((current) => ({ ...current, title }));
+                setTaskFieldErrors((current) => ({ ...current, title: undefined }));
+                setError(null);
               }}
             />
-            <ChoiceChip
-              selected={taskDraft.scheduleMode === 'single'}
-              label="Um horário"
-              onPress={() => {
-                setTaskDraft((current) => ({ ...current, scheduleMode: 'single' }));
-                setTaskFieldErrors((current) => ({ ...current, schedule: undefined }));
-              }}
+            <FormField
+              label="Orientações"
+              multiline
+              value={taskDraft.instructions}
+              onChangeText={(instructions) => setTaskDraft((current) => ({ ...current, instructions }))}
             />
-            <ChoiceChip
-              selected={taskDraft.scheduleMode === 'interval'}
-              label="Intervalo fixo"
-              onPress={() => {
-                setTaskDraft((current) => ({ ...current, scheduleMode: 'interval' }));
-                setTaskFieldErrors((current) => ({ ...current, schedule: undefined }));
-              }}
-            />
-            <ChoiceChip
-              selected={taskDraft.scheduleMode === 'specific'}
-              label="Horários específicos"
-              onPress={() => {
-                setTaskDraft((current) => ({ ...current, scheduleMode: 'specific' }));
-                setTaskFieldErrors((current) => ({ ...current, schedule: undefined }));
-              }}
-            />
-          </View>
 
-          {taskDraft.scheduleMode === 'event' ? (
-            <View style={styles.scheduleHint}>
-              <Text style={styles.scheduleHintTitle}>Sem horário obrigatório</Text>
-              <Text style={styles.scheduleHintText}>
-                O item ficará pendente durante a hospedagem e o cuidador marca quando realmente executar a ação.
-              </Text>
+            <Text style={styles.fieldLabel}>Pet relacionado</Text>
+            <View style={styles.choices}>
+              <ChoiceChip
+                selected={taskDraft.petId === null}
+                label="Todos / geral"
+                onPress={() => setTaskDraft((current) => ({ ...current, petId: null }))}
+              />
+              {eventPets.map((pet) => (
+                <ChoiceChip
+                  key={pet.pet_id}
+                  selected={taskDraft.petId === pet.pet_id}
+                  label={petNameFromSnapshot(pet.pet_snapshot)}
+                  onPress={() => setTaskDraft((current) => ({ ...current, petId: pet.pet_id }))}
+                />
+              ))}
             </View>
-          ) : null}
 
-          {taskDraft.scheduleMode === 'single' ? (
-            <DateTimeField
-              label="Data e horário"
-              mode="datetime"
-              minimumDate={eventMinimumDate}
-              maximumDate={eventMaximumDate}
-              placeholder="Selecionar horário"
-              value={taskDraft.singleAt}
-              error={taskFieldErrors.schedule}
-              onChange={(singleAt) => {
-                setTaskDraft((current) => ({ ...current, singleAt }));
-                setTaskFieldErrors((current) => ({ ...current, schedule: undefined }));
-              }}
-            />
-          ) : null}
+            <View style={styles.photoRule}>
+              <View style={styles.photoRuleCopy}>
+                <Text style={styles.photoRuleTitle}>Exigir foto para concluir</Text>
+                <Text style={styles.photoRuleText}>A evidência será registrada no chat do evento.</Text>
+              </View>
+              <Switch
+                trackColor={{ false: colors.border, true: colors.primarySoft }}
+                thumbColor={taskDraft.requiresPhoto ? colors.primary : colors.surface}
+                value={taskDraft.requiresPhoto}
+                onValueChange={(requiresPhoto) => setTaskDraft((current) => ({ ...current, requiresPhoto }))}
+              />
+            </View>
 
-          {taskDraft.scheduleMode === 'interval' ? (
-            <>
-              <DateTimeField
-                label="Primeiro registro"
-                mode="datetime"
-                minimumDate={eventMinimumDate}
-                maximumDate={eventMaximumDate}
-                placeholder="Selecionar início"
-                value={taskDraft.intervalStart}
-                onChange={(intervalStart) => {
-                  setTaskDraft((current) => ({ ...current, intervalStart }));
+            <Text style={styles.fieldLabel}>Quando esta tarefa deve ser feita?</Text>
+            <View style={styles.choices}>
+              <ChoiceChip
+                selected={taskDraft.scheduleMode === 'event'}
+                label="Quando for realizado"
+                onPress={() => {
+                  setTaskDraft((current) => ({ ...current, scheduleMode: 'event' }));
                   setTaskFieldErrors((current) => ({ ...current, schedule: undefined }));
                 }}
               />
-              <DateTimeField
-                label="Último registro"
-                mode="datetime"
-                minimumDate={parsePickerValue(taskDraft.intervalStart, 'datetime') ?? eventMinimumDate}
-                maximumDate={eventMaximumDate}
-                placeholder="Selecionar término"
-                value={taskDraft.intervalEnd}
-                error={taskFieldErrors.schedule}
-                onChange={(intervalEnd) => {
-                  setTaskDraft((current) => ({ ...current, intervalEnd }));
+              <ChoiceChip
+                selected={taskDraft.scheduleMode === 'single'}
+                label="Um horário"
+                onPress={() => {
+                  setTaskDraft((current) => ({ ...current, scheduleMode: 'single' }));
                   setTaskFieldErrors((current) => ({ ...current, schedule: undefined }));
                 }}
               />
-              <FormField
-                label="Intervalo em minutos"
-                keyboardType="number-pad"
-                hint="Mínimo de 5 minutos. Cada ocorrência vira um item separado no checklist."
-                value={taskDraft.intervalMinutes}
-                error={taskFieldErrors.schedule}
-                onChangeText={(intervalMinutes) => {
-                  setTaskDraft((current) => ({ ...current, intervalMinutes }));
+              <ChoiceChip
+                selected={taskDraft.scheduleMode === 'interval'}
+                label="Intervalo fixo"
+                onPress={() => {
+                  setTaskDraft((current) => ({ ...current, scheduleMode: 'interval' }));
                   setTaskFieldErrors((current) => ({ ...current, schedule: undefined }));
                 }}
               />
-            </>
-          ) : null}
+              <ChoiceChip
+                selected={taskDraft.scheduleMode === 'specific'}
+                label="Horários específicos"
+                onPress={() => {
+                  setTaskDraft((current) => ({ ...current, scheduleMode: 'specific' }));
+                  setTaskFieldErrors((current) => ({ ...current, schedule: undefined }));
+                }}
+              />
+            </View>
 
-          {taskDraft.scheduleMode === 'specific' ? (
-            <View style={styles.specificBlock}>
+            {taskDraft.scheduleMode === 'event' ? (
+              <View style={styles.scheduleHint}>
+                <Text style={styles.scheduleHintTitle}>Sem horário obrigatório</Text>
+                <Text style={styles.scheduleHintText}>
+                  O item ficará pendente durante a hospedagem e o cuidador marca quando realmente executar a ação.
+                </Text>
+              </View>
+            ) : null}
+
+            {taskDraft.scheduleMode === 'single' ? (
               <DateTimeField
-                label="Adicionar data e horário"
+                label="Data e horário"
                 mode="datetime"
                 minimumDate={eventMinimumDate}
                 maximumDate={eventMaximumDate}
                 placeholder="Selecionar horário"
-                value={taskDraft.specificCandidate}
-                error={taskFieldErrors.specificCandidate}
-                onChange={(specificCandidate) => {
-                  setTaskDraft((current) => ({ ...current, specificCandidate }));
-                  setTaskFieldErrors((current) => ({ ...current, specificCandidate: undefined }));
+                value={taskDraft.singleAt}
+                error={taskFieldErrors.schedule}
+                onChange={(singleAt) => {
+                  setTaskDraft((current) => ({ ...current, singleAt }));
+                  setTaskFieldErrors((current) => ({ ...current, schedule: undefined }));
                 }}
               />
-              <SecondaryButton label="Adicionar este horário" onPress={addSpecificTime} />
-              {taskDraft.specificTimes.length ? (
-                <View style={styles.specificList}>
-                  {taskDraft.specificTimes.map((time) => (
-                    <View key={time} style={styles.specificItem}>
-                      <Text style={styles.specificTime}>{formatDateTime(parsePickerValue(time, 'datetime')?.toISOString() ?? null)}</Text>
-                      <Pressable
-                        accessibilityRole="button"
-                        onPress={() =>
-                          setTaskDraft((current) => ({
-                            ...current,
-                            specificTimes: current.specificTimes.filter((candidate) => candidate !== time),
-                          }))
-                        }>
-                        <Text style={styles.specificRemove}>Remover</Text>
-                      </Pressable>
-                    </View>
-                  ))}
-                </View>
-              ) : (
-                <Text style={styles.scheduleValidation}>{taskFieldErrors.schedule ?? 'Nenhum horário adicionado ainda.'}</Text>
-              )}
-            </View>
-          ) : null}
+            ) : null}
 
-          {taskFieldErrors.schedule && taskDraft.scheduleMode !== 'single' && taskDraft.scheduleMode !== 'interval' && taskDraft.scheduleMode !== 'specific' ? (
-            <Text style={styles.scheduleValidation}>{taskFieldErrors.schedule}</Text>
-          ) : null}
+            {taskDraft.scheduleMode === 'interval' ? (
+              <>
+                <DateTimeField
+                  label="Primeiro registro"
+                  mode="datetime"
+                  minimumDate={eventMinimumDate}
+                  maximumDate={eventMaximumDate}
+                  placeholder="Selecionar início"
+                  value={taskDraft.intervalStart}
+                  onChange={(intervalStart) => {
+                    setTaskDraft((current) => ({ ...current, intervalStart }));
+                    setTaskFieldErrors((current) => ({ ...current, schedule: undefined }));
+                  }}
+                />
+                <DateTimeField
+                  label="Último registro"
+                  mode="datetime"
+                  minimumDate={parsePickerValue(taskDraft.intervalStart, 'datetime') ?? eventMinimumDate}
+                  maximumDate={eventMaximumDate}
+                  placeholder="Selecionar término"
+                  value={taskDraft.intervalEnd}
+                  error={taskFieldErrors.schedule}
+                  onChange={(intervalEnd) => {
+                    setTaskDraft((current) => ({ ...current, intervalEnd }));
+                    setTaskFieldErrors((current) => ({ ...current, schedule: undefined }));
+                  }}
+                />
+                <FormField
+                  label="Intervalo em minutos"
+                  keyboardType="number-pad"
+                  hint="Mínimo de 5 minutos. Cada ocorrência vira um item separado no checklist."
+                  value={taskDraft.intervalMinutes}
+                  error={taskFieldErrors.schedule}
+                  onChangeText={(intervalMinutes) => {
+                    setTaskDraft((current) => ({ ...current, intervalMinutes }));
+                    setTaskFieldErrors((current) => ({ ...current, schedule: undefined }));
+                  }}
+                />
+              </>
+            ) : null}
 
-          <PrimaryButton label="Adicionar ao checklist" loading={busy} onPress={() => void addTasks()} />
-        </SectionCard>
-      ) : null}
-
-      <SectionCard
-        title="Checklist"
-        description={tasks.length ? `${completedTasks} de ${tasks.length} concluída(s).` : 'Nenhuma tarefa foi adicionada.'}>
-        <View style={styles.taskList}>
-          {tasks.map((task) => (
-            <View key={task.id} style={[styles.taskCard, task.completed_at && styles.taskCardDone]}>
-              <View style={styles.taskTop}>
-                <View style={styles.taskCopy}>
-                  <Text style={[styles.taskTitle, task.completed_at && styles.taskTitleDone]}>{task.title}</Text>
-                  <Text style={styles.taskMeta}>
-                    {formatDateTime(task.due_at)}{task.requires_photo ? ' • 📸 foto obrigatória' : ''}
+            {taskDraft.scheduleMode === 'specific' ? (
+              <View style={styles.specificBlock}>
+                <DateTimeField
+                  label="Adicionar data e horário"
+                  mode="datetime"
+                  minimumDate={eventMinimumDate}
+                  maximumDate={eventMaximumDate}
+                  placeholder="Selecionar horário"
+                  value={taskDraft.specificCandidate}
+                  error={taskFieldErrors.specificCandidate}
+                  onChange={(specificCandidate) => {
+                    setTaskDraft((current) => ({ ...current, specificCandidate }));
+                    setTaskFieldErrors((current) => ({ ...current, specificCandidate: undefined }));
+                  }}
+                />
+                <SecondaryButton label="Adicionar este horário" onPress={addSpecificTime} />
+                {taskDraft.specificTimes.length ? (
+                  <View style={styles.specificList}>
+                    {taskDraft.specificTimes.map((time) => (
+                      <View key={time} style={styles.specificItem}>
+                        <Text style={styles.specificTime}>
+                          {formatDateTime(parsePickerValue(time, 'datetime')?.toISOString() ?? null)}
+                        </Text>
+                        <Pressable
+                          accessibilityRole="button"
+                          onPress={() =>
+                            setTaskDraft((current) => ({
+                              ...current,
+                              specificTimes: current.specificTimes.filter((candidate) => candidate !== time),
+                            }))
+                          }>
+                          <Text style={styles.specificRemove}>Remover</Text>
+                        </Pressable>
+                      </View>
+                    ))}
+                  </View>
+                ) : (
+                  <Text style={styles.scheduleValidation}>
+                    {taskFieldErrors.schedule ?? 'Nenhum horário adicionado ainda.'}
                   </Text>
-                  {task.instructions ? <Text style={styles.taskInstructions}>{task.instructions}</Text> : null}
-                </View>
-                <Text style={styles.taskCheck}>{task.completed_at ? '✓' : '○'}</Text>
+                )}
               </View>
+            ) : null}
 
-              {isTutor && event.status === 'draft' ? (
-                <Pressable accessibilityRole="button" onPress={() => void deleteTask(task.id)}>
-                  <Text style={styles.removeTask}>Remover tarefa</Text>
-                </Pressable>
-              ) : null}
+            {taskFieldErrors.schedule &&
+            taskDraft.scheduleMode !== 'single' &&
+            taskDraft.scheduleMode !== 'interval' &&
+            taskDraft.scheduleMode !== 'specific' ? (
+              <Text style={styles.scheduleValidation}>{taskFieldErrors.schedule}</Text>
+            ) : null}
 
-              {isCaregiver && event.status === 'in_progress' && !task.completed_at ? (
-                <Pressable
-                  accessibilityRole="button"
-                  disabled={busy}
-                  onPress={() => void completeTask(task)}
-                  style={({ pressed }) => [styles.completeButton, pressed && styles.pressed]}>
-                  <Text style={styles.completeButtonText}>
-                    {task.requires_photo ? '📸 Fotografar e concluir' : 'Marcar como concluída'}
-                  </Text>
-                </Pressable>
-              ) : null}
-            </View>
-          ))}
-        </View>
-      </SectionCard>
-
-      <EventActions
-        event={event}
-        isTutor={isTutor}
-        isCaregiver={isCaregiver}
-        busy={busy}
-        incompleteCount={incompleteTasks.length}
-        onTransition={(target) => void transition(target)}
-        onCancel={confirmCancel}
-      />
-
-      <SectionCard
-        title="Chat e registro do evento"
-        description="Mensagens, alterações de estado, fotos e conclusões ficam vinculadas somente a esta hospedagem.">
-        <View style={styles.timeline}>
-          {messages.length === 0 ? (
-            <Text style={styles.emptyText}>Nenhuma mensagem registrada ainda.</Text>
-          ) : (
-            messages.map((message) => (
-              <ChatBubble
-                key={message.id}
-                message={message}
-                mine={message.sender_id === user?.id}
-                senderName={message.sender_id ? profiles.get(message.sender_id)?.full_name : undefined}
-              />
-            ))
-          )}
-        </View>
-
-        {event.status !== 'cancelled' ? (
-          <>
-            <FormField
-              label="Mensagem"
-              multiline
-              maxLength={1500}
-              placeholder="Escreva para o outro participante..."
-              value={messageBody}
-              onChangeText={setMessageBody}
-            />
-            <PrimaryButton
-              disabled={!messageBody.trim()}
-              label="Enviar mensagem"
-              loading={busy}
-              onPress={() => void sendMessage()}
-            />
-          </>
+            <PrimaryButton label="Adicionar ao checklist" loading={busy} onPress={() => void addTasks()} />
+          </SectionCard>
         ) : null}
-      </SectionCard>
-    </ScreenShell>
+
+        <SectionCard
+          title="Checklist"
+          description={tasks.length ? `${completedTasks} de ${tasks.length} concluída(s).` : 'Nenhuma tarefa foi adicionada.'}>
+          <View style={styles.taskList}>
+            {tasks.map((task) => (
+              <View key={task.id} style={[styles.taskCard, task.completed_at && styles.taskCardDone]}>
+                <View style={styles.taskTop}>
+                  <View style={styles.taskCopy}>
+                    <Text style={[styles.taskTitle, task.completed_at && styles.taskTitleDone]}>{task.title}</Text>
+                    <Text style={styles.taskMeta}>
+                      {formatDateTime(task.due_at)}{task.requires_photo ? ' • 📸 foto obrigatória' : ''}
+                    </Text>
+                    {task.instructions ? <Text style={styles.taskInstructions}>{task.instructions}</Text> : null}
+                  </View>
+                  <Text style={styles.taskCheck}>{task.completed_at ? '✓' : '○'}</Text>
+                </View>
+
+                {isTutor && event.status === 'draft' ? (
+                  <Pressable accessibilityRole="button" onPress={() => void deleteTask(task.id)}>
+                    <Text style={styles.removeTask}>Remover tarefa</Text>
+                  </Pressable>
+                ) : null}
+
+                {isCaregiver && event.status === 'in_progress' && !task.completed_at ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={busy}
+                    onPress={() => void completeTask(task)}
+                    style={({ pressed }) => [styles.completeButton, pressed && styles.pressed]}>
+                    <Text style={styles.completeButtonText}>
+                      {task.requires_photo ? '📸 Fotografar, ajustar e concluir' : 'Marcar como concluída'}
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            ))}
+          </View>
+        </SectionCard>
+
+        <EventActions
+          event={event}
+          isTutor={isTutor}
+          isCaregiver={isCaregiver}
+          busy={busy}
+          incompleteCount={incompleteTasks.length}
+          onTransition={(target) => void transition(target)}
+          onCancel={confirmCancel}
+        />
+
+        <SectionCard
+          title="Chat e registro do evento"
+          description="Mensagens, alterações de estado, fotos e conclusões ficam vinculadas somente a esta hospedagem.">
+          <View style={styles.timeline}>
+            {messages.length === 0 ? (
+              <Text style={styles.emptyText}>Nenhuma mensagem registrada ainda.</Text>
+            ) : (
+              messages.map((message) => (
+                <ChatBubble
+                  key={message.id}
+                  message={message}
+                  mine={message.sender_id === user?.id}
+                  senderName={message.sender_id ? profiles.get(message.sender_id)?.full_name : undefined}
+                  evidenceUrl={message.evidence_id ? evidenceUrls.get(message.evidence_id) : undefined}
+                  onOpenImage={(uri, caption) => setExpandedPhoto({ uri, caption })}
+                />
+              ))
+            )}
+          </View>
+
+          {event.status !== 'cancelled' ? (
+            <>
+              <FormField
+                label="Mensagem"
+                multiline
+                maxLength={1500}
+                placeholder="Escreva para o outro participante..."
+                value={messageBody}
+                onChangeText={setMessageBody}
+              />
+              <PrimaryButton
+                disabled={!messageBody.trim()}
+                label="Enviar mensagem"
+                loading={busy}
+                onPress={() => void sendMessage()}
+              />
+            </>
+          ) : null}
+        </SectionCard>
+      </ScreenShell>
+
+      <PetSnapshotModal
+        visible={Boolean(selectedSnapshot)}
+        snapshot={selectedSnapshot?.pet_snapshot}
+        handoffSnapshot={selectedSnapshot?.handoff_snapshot}
+        onClose={() => setSelectedSnapshot(null)}
+      />
+      <PhotoLightbox
+        uri={expandedPhoto?.uri ?? null}
+        caption={expandedPhoto?.caption}
+        onClose={() => setExpandedPhoto(null)}
+      />
+    </>
   );
 }
 
@@ -930,7 +1056,10 @@ function PersonBadge({ label, name }: { label: string; name: string }) {
 
 function Preset({ label, onPress }: { label: string; onPress: () => void }) {
   return (
-    <Pressable accessibilityRole="button" onPress={onPress} style={({ pressed }) => [styles.preset, pressed && styles.pressed]}>
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [styles.preset, pressed && styles.pressed]}>
       <Text style={styles.presetText}>{label}</Text>
     </Pressable>
   );
@@ -952,11 +1081,38 @@ function ChatBubble({
   message,
   mine,
   senderName,
+  evidenceUrl,
+  onOpenImage,
 }: {
   message: ChatMessage;
   mine: boolean;
   senderName?: string;
+  evidenceUrl?: string;
+  onOpenImage: (uri: string, caption: string | null) => void;
 }) {
+  if (message.message_type === 'photo_evidence') {
+    return (
+      <View style={styles.photoMessage}>
+        <Text style={styles.systemText}>{systemMessageText(message)}</Text>
+        {evidenceUrl ? (
+          <Pressable
+            accessibilityLabel={`Ampliar foto: ${message.body || 'evidência do cuidado'}`}
+            accessibilityRole="button"
+            onPress={() => onOpenImage(evidenceUrl, message.body)}
+            style={({ pressed }) => [styles.evidencePressable, pressed && styles.pressed]}>
+            <Image source={{ uri: evidenceUrl }} style={styles.evidenceThumbnail} />
+            <Text style={styles.expandHint}>Toque na foto para ampliar</Text>
+          </Pressable>
+        ) : (
+          <View style={styles.evidencePlaceholder}>
+            <Text style={styles.evidencePlaceholderText}>Preparando miniatura...</Text>
+          </View>
+        )}
+        <Text style={styles.messageTime}>{formatDateTime(message.created_at)}</Text>
+      </View>
+    );
+  }
+
   if (message.message_type !== 'text') {
     return (
       <View style={styles.systemMessage}>
@@ -1049,24 +1205,41 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radii.md,
+    backgroundColor: colors.surface,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
   },
   snapshotEmoji: {
-    fontSize: 20,
+    fontSize: 22,
+  },
+  snapshotCopy: {
+    flex: 1,
+    gap: spacing.xs,
   },
   snapshotName: {
-    flex: 1,
     color: colors.text,
     fontSize: 14,
     fontWeight: '900',
+  },
+  snapshotHint: {
+    color: colors.textMuted,
+    fontSize: 11,
+  },
+  snapshotAction: {
+    alignItems: 'flex-end',
+    gap: spacing.xs,
   },
   snapshotBadge: {
     color: colors.primary,
     fontSize: 9,
     fontWeight: '900',
     letterSpacing: 0.7,
+  },
+  snapshotArrow: {
+    color: colors.primary,
+    fontSize: 22,
+    fontWeight: '900',
   },
   instructions: {
     color: colors.textMuted,
@@ -1300,11 +1473,48 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.xs,
   },
+  photoMessage: {
+    alignSelf: 'center',
+    width: '94%',
+    padding: spacing.md,
+    borderRadius: radii.lg,
+    backgroundColor: colors.accentSoft,
+    gap: spacing.sm,
+  },
   systemText: {
     color: colors.text,
     fontSize: 11,
     fontWeight: '800',
     textAlign: 'center',
+  },
+  evidencePressable: {
+    gap: spacing.xs,
+  },
+  evidenceThumbnail: {
+    width: '100%',
+    aspectRatio: 4 / 3,
+    borderRadius: radii.md,
+    backgroundColor: colors.surfaceMuted,
+  },
+  expandHint: {
+    color: colors.primary,
+    fontSize: 10,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  evidencePlaceholder: {
+    minHeight: 100,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  evidencePlaceholderText: {
+    color: colors.textMuted,
+    fontSize: 11,
   },
   emptyText: {
     color: colors.textMuted,
