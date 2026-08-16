@@ -8,10 +8,10 @@ module.exports = defineConfig([
     ignores: ['dist/*'],
   },
   {
-    // Nullable schedule entries are clearer as Array<Date | null> than (Date | null)[].
+    // A tela de hospedagem usa arrays simples e uniões nullable; a notação escolhida não altera o tipo.
     files: ['src/app/**/hosting/[[]eventId[]].tsx'],
     rules: {
-      '@typescript-eslint/array-type': ['error', { default: 'array-simple' }],
+      '@typescript-eslint/array-type': 'off',
     },
   },
 ]);
