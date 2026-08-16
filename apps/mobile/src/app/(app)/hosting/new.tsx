@@ -98,11 +98,7 @@ export default function NewHostingScreen() {
     const otherUserId =
       nextConnection.user_a_id === user.id ? nextConnection.user_b_id : nextConnection.user_a_id;
     const { data: caregiverData, error: caregiverError } = await supabase
-      .from('profiles')
-      .select(
-        'id, public_code, full_name, phone, avatar_path, tutor_enabled, caregiver_enabled, created_at, updated_at',
-      )
-      .eq('id', otherUserId)
+      .rpc('get_safe_connected_profile', { p_profile_id: otherUserId })
       .single();
 
     if (caregiverError || !caregiverData) {

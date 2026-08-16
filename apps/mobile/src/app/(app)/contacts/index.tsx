@@ -59,12 +59,9 @@ export default function ContactsScreen() {
 
     let profileMap = new Map<string, HospedaProfile>();
     if (otherIds.length) {
-      const { data: profiles, error: profileError } = await supabase
-        .from('profiles')
-        .select(
-          'id, public_code, full_name, phone, avatar_path, tutor_enabled, caregiver_enabled, created_at, updated_at',
-        )
-        .in('id', otherIds);
+      const { data: profiles, error: profileError } = await supabase.rpc(
+        'list_my_safe_connection_profiles',
+      );
 
       if (profileError) {
         setError('Os contatos foram encontrados, mas alguns perfis não puderam ser carregados.');

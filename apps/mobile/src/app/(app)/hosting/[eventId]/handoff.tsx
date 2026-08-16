@@ -149,10 +149,7 @@ export default function HandoffPreparationScreen() {
         .select('id, tutor_id, caregiver_id, status')
         .eq('id', eventId)
         .single(),
-      supabase
-        .from('hosting_event_pets')
-        .select('event_id, pet_id, pet_snapshot, handoff_snapshot')
-        .eq('event_id', eventId),
+      supabase.rpc('get_event_pets', { p_event_id: eventId }),
     ]);
 
     if (eventError || !eventData || petError) {

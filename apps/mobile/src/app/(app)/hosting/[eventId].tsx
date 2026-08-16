@@ -199,10 +199,7 @@ export default function HostingEventScreen() {
         .select('id, connection_id, tutor_id, caregiver_id, title, status, starts_at, ends_at, tutor_instructions')
         .eq('id', eventId)
         .single(),
-      supabase
-        .from('hosting_event_pets')
-        .select('event_id, pet_id, pet_snapshot, handoff_snapshot')
-        .eq('event_id', eventId),
+      supabase.rpc('get_event_pets', { p_event_id: eventId }),
       supabase
         .from('event_tasks')
         .select('id, event_id, pet_id, category, title, instructions, due_at, requires_photo, sort_order, completed_at, completed_by')
@@ -226,10 +223,9 @@ export default function HostingEventScreen() {
 
     const nextEvent = eventResult.data as HostingEvent;
     const nextMessages = (messagesResult.data ?? []) as ChatMessage[];
-    const profileResult = await supabase
-      .from('profiles')
-      .select('id, public_code, full_name, phone, avatar_path, tutor_enabled, caregiver_enabled, created_at, updated_at')
-      .in('id', [nextEvent.tutor_id, nextEvent.caregiver_id]);
+    const profileResult = await supabase.rpc('get_event_participant_profiles', {
+      p_event_id: eventId,
+    });
 
     const evidenceIds = Array.from(
       new Set(
