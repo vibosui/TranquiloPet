@@ -67,6 +67,34 @@ function chooseLanAddress() {
   return candidates[0].address;
 }
 
+function startExpo() {
+  const npmArgs = [
+    'run',
+    'start',
+    '--workspace=@hospeda-patas/mobile',
+    '--',
+    '--lan',
+    '--port',
+    String(port),
+  ];
+
+  const options = {
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      EXPO_NO_TELEMETRY: process.env.EXPO_NO_TELEMETRY || '1',
+    },
+  };
+
+  if (process.platform === 'win32') {
+    const commandProcessor = process.env.ComSpec || process.env.COMSPEC || 'cmd.exe';
+    const command = ['npm.cmd', ...npmArgs].join(' ');
+    return spawn(commandProcessor, ['/d', '/s', '/c', command], options);
+  }
+
+  return spawn('npm', npmArgs, options);
+}
+
 const host = forcedHost || chooseLanAddress();
 const demoUrl = `http://${host}:${port}/demo`;
 const outputDirectory = resolve('artifacts', 'event');
@@ -105,26 +133,13 @@ console.log('\nO Expo exibirá abaixo o segundo QR, destinado ao Expo Go/teste t
 console.log('Mantenha este terminal aberto durante a apresentação.');
 console.log('IMPORTANTE: os celulares precisam alcançar este notebook pela rede local.\n');
 
-const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-const child = spawn(
-  npmCommand,
-  [
-    'run',
-    'start',
-    '--workspace=@hospeda-patas/mobile',
-    '--',
-    '--lan',
-    '--port',
-    String(port),
-  ],
-  {
-    stdio: 'inherit',
-    env: {
-      ...process.env,
-      EXPO_NO_TELEMETRY: process.env.EXPO_NO_TELEMETRY || '1',
-    },
-  },
-);
+const child = startExpo();
+
+child.on('error', (error) => {
+  console.error('\nNão foi possível iniciar o Expo no modo evento.');
+  console.error(error);
+  process.exitCode = 1;
+});
 
 function stop(signal) {
   if (!child.killed) child.kill(signal);
