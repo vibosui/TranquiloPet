@@ -6,6 +6,7 @@ import QRCode from 'qrcode';
 
 const port = Number(process.env.HOSPEDA_PATAS_EVENT_PORT || 8081);
 const forcedHost = process.env.HOSPEDA_PATAS_EVENT_HOST?.trim();
+const qrOnly = process.env.HOSPEDA_PATAS_EVENT_QR_ONLY === '1';
 
 if (!Number.isInteger(port) || port < 1024 || port > 65535) {
   throw new Error('HOSPEDA_PATAS_EVENT_PORT precisa ser uma porta válida entre 1024 e 65535.');
@@ -94,6 +95,12 @@ console.log(terminalQr);
 console.log(`URL: ${demoUrl}`);
 console.log(`PNG para a apresentação: ${qrPath}`);
 console.log(`URL salva em: ${urlPath}`);
+
+if (qrOnly) {
+  console.log('\nQR gerado em modo de validação. O servidor Expo não será iniciado.');
+  process.exit(0);
+}
+
 console.log('\nO Expo exibirá abaixo o segundo QR, destinado ao Expo Go/teste técnico.');
 console.log('Mantenha este terminal aberto durante a apresentação.');
 console.log('IMPORTANTE: os celulares precisam alcançar este notebook pela rede local.\n');
