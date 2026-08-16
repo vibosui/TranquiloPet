@@ -8,6 +8,7 @@ const port = Number(process.env.HOSPEDA_PATAS_EVENT_PORT || 8081);
 const forcedHost = process.env.HOSPEDA_PATAS_EVENT_HOST?.trim();
 const qrOnly = process.env.HOSPEDA_PATAS_EVENT_QR_ONLY === '1';
 const quickTunnelTimeoutMs = Number(process.env.HOSPEDA_PATAS_TUNNEL_TIMEOUT_MS || 90000);
+const expoReadyTimeoutMs = Number(process.env.HOSPEDA_PATAS_EXPO_READY_TIMEOUT_MS || 60000);
 
 if (!Number.isInteger(port) || port < 1024 || port > 65535) {
   throw new Error('HOSPEDA_PATAS_EVENT_PORT precisa ser uma porta válida entre 1024 e 65535.');
@@ -15,6 +16,10 @@ if (!Number.isInteger(port) || port < 1024 || port > 65535) {
 
 if (!Number.isInteger(quickTunnelTimeoutMs) || quickTunnelTimeoutMs < 15000) {
   throw new Error('HOSPEDA_PATAS_TUNNEL_TIMEOUT_MS precisa ser de pelo menos 15000 ms.');
+}
+
+if (!Number.isInteger(expoReadyTimeoutMs) || expoReadyTimeoutMs < 10000) {
+  throw new Error('HOSPEDA_PATAS_EXPO_READY_TIMEOUT_MS precisa ser de pelo menos 10000 ms.');
 }
 
 function isPrivateIPv4(address) {
@@ -154,19 +159,67 @@ function startExpo(publicTunnelUrl) {
     'start',
     '--workspace=@hospeda-patas/mobile',
     '--',
+    '--go',
     '--localhost',
     '--port',
     String(port),
   ];
 
   return spawnCrossPlatform(process.platform === 'win32' ? 'npm.cmd' : 'npm', npmArgs, {
-    stdio: ['inherit', 'pipe', 'pipe'],
+    stdio: 'inherit',
     env: {
       ...process.env,
       EXPO_NO_TELEMETRY: process.env.EXPO_NO_TELEMETRY || '1',
       EXPO_PACKAGER_PROXY_URL: publicTunnelUrl,
     },
   });
+}
+
+async function sleep(ms) {
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
+}
+
+async function waitForExpoGoUrl() {
+  const deadline = Date.now() + expoReadyTimeoutMs;
+  const endpoint = `http://127.0.0.1:${port}/_expo/open?platform=android&runtime=expo`;
+  let lastError = null;
+
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(endpoint, { signal: AbortSignal.timeout(3000) });
+      if (response.ok) {
+        const payload = await response.json();
+        if (typeof payload?.url === 'string' && /^exps?:\/\//i.test(payload.url)) {
+          return payload.url;
+        }
+      }
+    } catch (error) {
+      lastError = error;
+    }
+    await sleep(500);
+  }
+
+  throw new Error(
+    `Expo não publicou o deep link do Expo Go em ${Math.round(expoReadyTimeoutMs / 1000)} s${
+      lastError instanceof Error ? `: ${lastError.message}` : '.'
+    }`,
+  );
+}
+
+async function verifyExternalExpoEndpoint(publicTunnelUrl) {
+  const endpoint = `${publicTunnelUrl}/_expo/open?platform=android&runtime=expo`;
+  const response = await fetch(endpoint, {
+    headers: { accept: 'application/json' },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) {
+    throw new Error(`Tunnel respondeu HTTP ${response.status} ao endpoint do Expo.`);
+  }
+  const payload = await response.json();
+  if (typeof payload?.url !== 'string' || !/^exps?:\/\//i.test(payload.url)) {
+    throw new Error('Tunnel respondeu, mas não devolveu um deep link válido do Expo Go.');
+  }
+  return payload.url;
 }
 
 const host = forcedHost || chooseLanAddress();
@@ -214,7 +267,6 @@ console.log('Esse endereço funciona pela internet; o celular não precisa estar
 let tunnelChild = null;
 let expoChild = null;
 let stopping = false;
-let appQrWritten = false;
 
 try {
   tunnelChild = startCloudflareQuickTunnel();
@@ -223,50 +275,9 @@ try {
 
   console.log('\n✅ Tunnel público criado.');
   console.log(`Tunnel: ${publicTunnelUrl}`);
-  console.log('Iniciando o Expo com esse tunnel como endereço público do APP REAL...\n');
+  console.log('Iniciando o Expo Go com esse tunnel como endereço público do APP REAL...\n');
 
   expoChild = startExpo(publicTunnelUrl);
-
-  const inspectExpoOutput = async (chunk, target) => {
-    const text = chunk.toString();
-    target.write(text);
-    if (appQrWritten) return;
-
-    const clean = stripAnsi(text);
-    const match = clean.match(/\b(?:exps?|exp):\/\/[^\s]+/i);
-    if (!match) return;
-
-    const appUrl = match[0].replace(/[),.;]+$/, '');
-    appQrWritten = true;
-    await QRCode.toFile(appQrPath, appUrl, {
-      width: 1600,
-      margin: 4,
-      errorCorrectionLevel: 'H',
-    });
-    await writeFile(appUrlPath, `${appUrl}\n`, 'utf8');
-
-    const terminalAppQr = await QRCode.toString(appUrl, {
-      type: 'terminal',
-      small: true,
-      errorCorrectionLevel: 'M',
-    });
-
-    console.log('\n============================================================');
-    console.log(' QR APP REAL — EXPO GO / INTERNET');
-    console.log('============================================================');
-    console.log(terminalAppQr);
-    console.log(`URL Expo: ${appUrl}`);
-    console.log(`PNG do app para teste/apresentação: ${appQrPath}`);
-    console.log('Esse QR abre o aplicativo real e usa os usuários/dados reais do Supabase.');
-    console.log('Pode ser aberto em outra Wi-Fi ou no 4G/5G enquanto este terminal estiver rodando.\n');
-  };
-
-  expoChild.stdout?.on('data', (chunk) => {
-    void inspectExpoOutput(chunk, process.stdout);
-  });
-  expoChild.stderr?.on('data', (chunk) => {
-    void inspectExpoOutput(chunk, process.stderr);
-  });
 
   expoChild.once('error', (error) => {
     console.error('\nNão foi possível iniciar o Expo.');
@@ -288,11 +299,45 @@ try {
     stopAll('SIGTERM');
     process.exitCode = code ?? 1;
   });
+
+  const localAppUrl = await waitForExpoGoUrl();
+  const externalAppUrl = await verifyExternalExpoEndpoint(publicTunnelUrl);
+  const tunnelHostname = new URL(publicTunnelUrl).hostname;
+
+  if (!localAppUrl.includes(tunnelHostname) || !externalAppUrl.includes(tunnelHostname)) {
+    throw new Error(
+      `Expo iniciou, mas o deep link não está usando o tunnel público ${tunnelHostname}. URL local: ${localAppUrl}; URL externa: ${externalAppUrl}`,
+    );
+  }
+
+  await QRCode.toFile(appQrPath, externalAppUrl, {
+    width: 1600,
+    margin: 4,
+    errorCorrectionLevel: 'H',
+  });
+  await writeFile(appUrlPath, `${externalAppUrl}\n`, 'utf8');
+
+  const terminalAppQr = await QRCode.toString(externalAppUrl, {
+    type: 'terminal',
+    small: true,
+    errorCorrectionLevel: 'M',
+  });
+
+  console.log('\n============================================================');
+  console.log(' QR APP REAL — EXPO GO / INTERNET');
+  console.log('============================================================');
+  console.log(terminalAppQr);
+  console.log(`URL Expo Go: ${externalAppUrl}`);
+  console.log(`PNG do APP REAL: ${appQrPath}`);
+  console.log(`URL salva em: ${appUrlPath}`);
+  console.log('✅ Verificação externa concluída pelo próprio endereço público do Cloudflare.');
+  console.log('Esse QR abre o aplicativo real e usa os usuários/dados reais do Supabase.');
+  console.log('Pode ser aberto em outra Wi-Fi ou no 4G/5G enquanto este terminal estiver rodando.\n');
 } catch (error) {
   console.error('\n❌ Não foi possível publicar o app pela internet.');
   console.error(error instanceof Error ? error.message : error);
   console.error('\nO app NÃO será rebaixado silenciosamente para LAN: este modo precisa garantir acesso externo.');
-  if (tunnelChild && !tunnelChild.killed) tunnelChild.kill('SIGTERM');
+  stopAll('SIGTERM');
   process.exitCode = 1;
 }
 
