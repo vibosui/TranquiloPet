@@ -1,11 +1,21 @@
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
+import * as Notifications from 'expo-notifications';
 import { router, type Href } from 'expo-router';
 import { type PropsWithChildren, useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 
 import { useAuth } from '@/core/auth/auth-context';
 import { supabase } from '@/core/supabase/client';
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }),
+});
 
 type NotificationRow = {
   id: string;
@@ -14,33 +24,6 @@ type NotificationRow = {
   event_id: string | null;
   payload: Record<string, unknown> | null;
 };
-
-type NotificationsApi = typeof import('expo-notifications');
-
-const isExpoGo = Constants.appOwnership === 'expo';
-let notificationsPromise: Promise<NotificationsApi> | null = null;
-let notificationHandlerConfigured = false;
-
-async function getNativeNotifications(): Promise<NotificationsApi | null> {
-  if (Platform.OS === 'web' || isExpoGo) return null;
-
-  notificationsPromise ??= import('expo-notifications');
-  const Notifications = await notificationsPromise;
-
-  if (!notificationHandlerConfigured) {
-    Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldPlaySound: true,
-        shouldSetBadge: false,
-        shouldShowBanner: true,
-        shouldShowList: true,
-      }),
-    });
-    notificationHandlerConfigured = true;
-  }
-
-  return Notifications;
-}
 
 function notificationUrl(data: Record<string, unknown> | undefined) {
   const explicitUrl = data?.url;
@@ -60,8 +43,7 @@ async function markNotificationRead(notificationId: unknown, userId: string | nu
 }
 
 async function registerDevice(userId: string) {
-  const Notifications = await getNativeNotifications();
-  if (!Notifications) return false;
+  if (Platform.OS === 'web') return false;
 
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync('hosting-updates', {
@@ -99,14 +81,13 @@ async function registerDevice(userId: string) {
     );
     return !error;
   } catch {
+    // Expo Go no Android não fornece push remoto no SDK 54. O fallback
+    // por Realtime + notificação local continua funcionando durante o beta.
     return false;
   }
 }
 
 async function presentLocalNotification(row: NotificationRow) {
-  const Notifications = await getNativeNotifications();
-  if (!Notifications) return;
-
   await Notifications.scheduleNotificationAsync({
     content: {
       title: row.title,
@@ -130,7 +111,7 @@ export function NotificationRuntime({ children }: PropsWithChildren) {
   userIdRef.current = user?.id ?? null;
 
   useEffect(() => {
-    if (loading || !user?.id || Platform.OS === 'web' || isExpoGo) {
+    if (loading || !user?.id || Platform.OS === 'web') {
       setRemotePushReady(false);
       return;
     }
@@ -145,7 +126,7 @@ export function NotificationRuntime({ children }: PropsWithChildren) {
   }, [loading, user?.id]);
 
   useEffect(() => {
-    if (!user?.id || Platform.OS === 'web' || isExpoGo) return;
+    if (!user?.id || Platform.OS === 'web') return;
 
     const channel = supabase
       .channel(`notifications:${user.id}`)
@@ -170,32 +151,22 @@ export function NotificationRuntime({ children }: PropsWithChildren) {
   }, [remotePushReady, user?.id]);
 
   useEffect(() => {
-    if (Platform.OS === 'web' || isExpoGo) return;
+    if (Platform.OS === 'web') return;
 
-    let active = true;
-    let responseSubscription: { remove: () => void } | null = null;
+    const redirect = (notification: Notifications.Notification) => {
+      const data = notification.request.content.data as Record<string, unknown>;
+      void markNotificationRead(data.notification_id, userIdRef.current);
+      router.push(notificationUrl(data) as Href);
+    };
 
-    void getNativeNotifications().then((Notifications) => {
-      if (!active || !Notifications) return;
+    const initialResponse = Notifications.getLastNotificationResponse();
+    if (initialResponse?.notification) redirect(initialResponse.notification);
 
-      const redirect = (notification: { request: { content: { data: unknown } } }) => {
-        const data = notification.request.content.data as Record<string, unknown>;
-        void markNotificationRead(data.notification_id, userIdRef.current);
-        router.push(notificationUrl(data) as Href);
-      };
-
-      const initialResponse = Notifications.getLastNotificationResponse();
-      if (initialResponse?.notification) redirect(initialResponse.notification);
-
-      responseSubscription = Notifications.addNotificationResponseReceivedListener((response) => {
-        redirect(response.notification);
-      });
+    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+      redirect(response.notification);
     });
 
-    return () => {
-      active = false;
-      responseSubscription?.remove();
-    };
+    return () => subscription.remove();
   }, []);
 
   return children;
