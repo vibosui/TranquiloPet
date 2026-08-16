@@ -13,6 +13,7 @@
     "android": "npm run android --workspace=@hospeda-patas/mobile",
     "ios:device": "npm run ios:device --workspace=@hospeda-patas/mobile",
     "export:ios": "npm run export:ios --workspace=@hospeda-patas/mobile",
+    "export:web": "npm run export:web --workspace=@hospeda-patas/mobile",
     "web": "npm run web --workspace=@hospeda-patas/mobile",
     "monitor": "powershell -ExecutionPolicy Bypass -File .\\scripts\\start-dev-monitor.ps1",
     "lint": "npm run lint --workspace=@hospeda-patas/mobile",
