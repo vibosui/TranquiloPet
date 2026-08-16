@@ -14,6 +14,7 @@ import {
 
 import { DateTimeField, parsePickerValue } from '@/components/date-time-field';
 import { ErrorBanner } from '@/components/error-banner';
+import { MediatedChatControls } from '@/components/mediated-chat-controls';
 import { FormField } from '@/components/form-field';
 import { PetSnapshotModal } from '@/components/pet-snapshot-modal';
 import { PhotoLightbox } from '@/components/photo-lightbox';
@@ -66,10 +67,20 @@ type ChatMessage = {
   id: string;
   event_id: string;
   sender_id: string | null;
-  message_type: 'text' | 'system' | 'task_completed' | 'photo_evidence' | 'event_status';
+  message_type:
+    | 'text'
+    | 'system'
+    | 'task_completed'
+    | 'photo_evidence'
+    | 'event_status'
+    | 'preset_question'
+    | 'preset_answer'
+    | 'photo_request';
   body: string | null;
   task_id: string | null;
   evidence_id: string | null;
+  preset_key: string | null;
+  reply_to_message_id: string | null;
   created_at: string;
 };
 
@@ -173,7 +184,6 @@ export default function HostingEventScreen() {
   const [expandedPhoto, setExpandedPhoto] = useState<ExpandedPhoto | null>(null);
   const [taskDraft, setTaskDraft] = useState<TaskDraft>(emptyTaskDraft);
   const [taskFieldErrors, setTaskFieldErrors] = useState<TaskFieldErrors>({});
-  const [messageBody, setMessageBody] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -201,7 +211,7 @@ export default function HostingEventScreen() {
         .order('sort_order', { ascending: true }),
       supabase
         .from('chat_messages')
-        .select('id, event_id, sender_id, message_type, body, task_id, evidence_id, created_at')
+        .select('id, event_id, sender_id, message_type, body, task_id, evidence_id, preset_key, reply_to_message_id, created_at')
         .eq('event_id', eventId)
         .order('created_at', { ascending: true })
         .limit(100),
@@ -586,25 +596,6 @@ export default function HostingEventScreen() {
     }
   }
 
-  async function sendMessage() {
-    if (!event || !user || busy || !messageBody.trim()) return;
-    setBusy(true);
-    setError(null);
-    const { error: messageError } = await supabase.from('chat_messages').insert({
-      event_id: event.id,
-      sender_id: user.id,
-      message_type: 'text',
-      body: messageBody.trim(),
-    });
-    if (messageError) {
-      setError('Não foi possível enviar a mensagem.');
-    } else {
-      setMessageBody('');
-      await loadEvent(false);
-    }
-    setBusy(false);
-  }
-
   function confirmCancel() {
     if (!event) return;
     Alert.alert('Cancelar hospedagem?', 'O histórico já registrado será preservado.', [
@@ -944,8 +935,8 @@ export default function HostingEventScreen() {
         />
 
         <SectionCard
-          title="Chat e registro do evento"
-          description="Mensagens, alterações de estado, fotos e conclusões ficam vinculadas somente a esta hospedagem.">
+          title="Comunicação e registro do evento"
+          description="A comunicação é mediada pelo Hospeda Patas. Perguntas, respostas, fotos e alterações de estado ficam vinculadas a esta hospedagem.">
           <View style={styles.timeline}>
             {messages.length === 0 ? (
               <Text style={styles.emptyText}>Nenhuma mensagem registrada ainda.</Text>
@@ -963,24 +954,22 @@ export default function HostingEventScreen() {
             )}
           </View>
 
-          {event.status !== 'cancelled' ? (
-            <>
-              <FormField
-                label="Mensagem"
-                multiline
-                maxLength={1500}
-                placeholder="Escreva para o outro participante..."
-                value={messageBody}
-                onChangeText={setMessageBody}
-              />
-              <PrimaryButton
-                disabled={!messageBody.trim()}
-                label="Enviar mensagem"
-                loading={busy}
-                onPress={() => void sendMessage()}
-              />
-            </>
-          ) : null}
+          <MediatedChatControls
+            eventId={event.id}
+            eventStatus={event.status}
+            userId={user?.id ?? null}
+            isTutor={isTutor}
+            isCaregiver={isCaregiver}
+            messages={messages}
+            tasks={tasks}
+            pets={eventPets}
+            busy={busy}
+            onChanged={() => loadEvent(false)}
+            onCapturePhotoTask={(taskId) => {
+              const task = tasks.find((candidate) => candidate.id === taskId);
+              return task ? captureEvidenceAndComplete(task) : undefined;
+            }}
+          />
         </SectionCard>
       </ScreenShell>
 
@@ -1113,7 +1102,7 @@ function ChatBubble({
     );
   }
 
-  if (message.message_type !== 'text') {
+  if (!['text', 'preset_question', 'preset_answer'].includes(message.message_type)) {
     return (
       <View style={styles.systemMessage}>
         <Text style={styles.systemText}>{systemMessageText(message)}</Text>
@@ -1132,6 +1121,7 @@ function ChatBubble({
 }
 
 function systemMessageText(message: ChatMessage) {
+  if (message.message_type === 'photo_request') return `📸 ${message.body || 'O tutor solicitou uma foto atual do pet.'}`;
   if (message.message_type === 'photo_evidence') return `📸 Evidência enviada: ${message.body || 'foto do cuidado'}`;
   if (message.message_type === 'task_completed') return `✓ Checklist concluído: ${message.body || 'tarefa'}`;
   if (message.message_type === 'event_status') {
