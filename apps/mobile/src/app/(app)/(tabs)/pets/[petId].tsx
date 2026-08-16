@@ -1,7 +1,8 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 
+import { DateTimeField } from '@/components/date-time-field';
 import { ErrorBanner } from '@/components/error-banner';
 import { FormField } from '@/components/form-field';
 import { PrimaryButton } from '@/components/primary-button';
@@ -83,9 +84,10 @@ type PetDossier = {
   };
   preventive_care: {
     vaccination_status: string;
-    vaccines: string;
-    last_vaccine_date: string;
-    next_vaccine_date: string;
+    vaccines: string[];
+    other_vaccine: string;
+    last_vaccine_date?: string;
+    next_vaccine_date?: string;
     deworming_status: string;
     deworming_details: string;
     flea_tick_status: string;
@@ -185,9 +187,8 @@ const emptyDossier: PetDossier = {
   },
   preventive_care: {
     vaccination_status: '',
-    vaccines: '',
-    last_vaccine_date: '',
-    next_vaccine_date: '',
+    vaccines: [],
+    other_vaccine: '',
     deworming_status: '',
     deworming_details: '',
     flea_tick_status: '',
@@ -208,10 +209,51 @@ const emptyDossier: PetDossier = {
     authorization: '',
   },
   additional_notes: '',
-  dossier_version: 2,
+  dossier_version: 3,
 };
 
+const knownVaccineKeys = ['v3', 'v4', 'v5', 'v8', 'v10', 'rabies', 'kennel_cough', 'giardia', 'other'] as const;
+
+function normalizeVaccines(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === 'string');
+  }
+  if (typeof value !== 'string' || !value.trim()) return [];
+
+  const lower = value.toLowerCase();
+  const selected: string[] = [];
+  if (/\bv3\b/.test(lower)) selected.push('v3');
+  if (/\bv4\b/.test(lower)) selected.push('v4');
+  if (/\bv5\b/.test(lower)) selected.push('v5');
+  if (/\bv8\b/.test(lower)) selected.push('v8');
+  if (/\bv10\b/.test(lower)) selected.push('v10');
+  if (/raiva|antirr[aá]b/.test(lower)) selected.push('rabies');
+  if (/gripe|tosse/.test(lower)) selected.push('kennel_cough');
+  if (/gi[aá]rd/.test(lower)) selected.push('giardia');
+  return selected;
+}
+
 function normalizeDossier(input: Partial<PetDossier> | null | undefined): PetDossier {
+  const rawPreventive = (input?.preventive_care ?? {}) as Record<string, unknown>;
+  const normalizedVaccines = normalizeVaccines(rawPreventive.vaccines);
+  let otherVaccine = typeof rawPreventive.other_vaccine === 'string' ? rawPreventive.other_vaccine : '';
+
+  if (
+    typeof rawPreventive.vaccines === 'string' &&
+    rawPreventive.vaccines.trim() &&
+    normalizedVaccines.length === 0
+  ) {
+    normalizedVaccines.push('other');
+    otherVaccine = otherVaccine || rawPreventive.vaccines.trim();
+  }
+
+  const preventiveCare: PetDossier['preventive_care'] = {
+    ...emptyDossier.preventive_care,
+    ...(rawPreventive as Partial<PetDossier['preventive_care']>),
+    vaccines: normalizedVaccines,
+    other_vaccine: otherVaccine,
+  };
+
   return {
     behavior: { ...emptyDossier.behavior, ...(input?.behavior ?? {}) },
     feeding: { ...emptyDossier.feeding, ...(input?.feeding ?? {}) },
@@ -221,12 +263,38 @@ function normalizeDossier(input: Partial<PetDossier> | null | undefined): PetDos
     hygiene: { ...emptyDossier.hygiene, ...(input?.hygiene ?? {}) },
     objects: { ...emptyDossier.objects, ...(input?.objects ?? {}) },
     health: { ...emptyDossier.health, ...(input?.health ?? {}) },
-    preventive_care: { ...emptyDossier.preventive_care, ...(input?.preventive_care ?? {}) },
+    preventive_care: preventiveCare,
     medications: Array.isArray(input?.medications) ? input.medications : [],
     emergency: { ...emptyDossier.emergency, ...(input?.emergency ?? {}) },
     additional_notes: input?.additional_notes ?? '',
-    dossier_version: 2,
+    dossier_version: 3,
   };
+}
+
+function vaccineOptionsForSpecies(species: string): readonly (readonly [string, string])[] {
+  if (species === 'dog') {
+    return [
+      ['v8', 'V8'],
+      ['v10', 'V10'],
+      ['rabies', 'Antirrábica'],
+      ['kennel_cough', 'Gripe / tosse dos canis'],
+      ['giardia', 'Giárdia'],
+      ['other', 'Outra'],
+    ];
+  }
+  if (species === 'cat') {
+    return [
+      ['v3', 'V3'],
+      ['v4', 'V4'],
+      ['v5', 'V5'],
+      ['rabies', 'Antirrábica'],
+      ['other', 'Outra'],
+    ];
+  }
+  return [
+    ['rabies', 'Antirrábica'],
+    ['other', 'Outra'],
+  ];
 }
 
 export default function PetDetailsScreen() {
@@ -291,7 +359,7 @@ export default function PetDetailsScreen() {
       ),
       Boolean(
         dossier.preventive_care.vaccination_status ||
-          dossier.preventive_care.vaccines ||
+          dossier.preventive_care.vaccines.length ||
           dossier.preventive_care.deworming_status ||
           dossier.preventive_care.flea_tick_status,
       ),
@@ -315,13 +383,17 @@ export default function PetDetailsScreen() {
 
     const { error: updateError } = await supabase
       .from('pets')
-      .update({ dossier: { ...dossier, dossier_version: 2 } })
+      .update({ dossier: { ...dossier, dossier_version: 3 } })
       .eq('id', pet.id);
 
     if (updateError) {
       setError('Não foi possível salvar o dossiê agora.');
     } else {
       setSaved(true);
+      Alert.alert('Dossiê salvo', 'As informações de cuidado foram atualizadas com sucesso.', [
+        { text: 'Continuar editando', style: 'cancel' },
+        { text: 'Voltar aos pets', onPress: () => router.back() },
+      ]);
     }
     setSaving(false);
   }
@@ -481,37 +553,41 @@ export default function PetDetailsScreen() {
         <Text style={styles.subheading}>Horários habituais</Text>
         <View style={styles.twoColumns}>
           <View style={styles.flexOne}>
-            <FormField
+            <DateTimeField
               label="Manhã"
-              placeholder="08:00"
+              mode="time"
+              placeholder="Selecionar"
               value={dossier.feeding.morning}
-              onChangeText={(morning) => patchSection('feeding', { ...dossier.feeding, morning })}
+              onChange={(morning) => patchSection('feeding', { ...dossier.feeding, morning })}
             />
           </View>
           <View style={styles.flexOne}>
-            <FormField
+            <DateTimeField
               label="Tarde"
-              placeholder="13:00"
+              mode="time"
+              placeholder="Selecionar"
               value={dossier.feeding.afternoon}
-              onChangeText={(afternoon) => patchSection('feeding', { ...dossier.feeding, afternoon })}
+              onChange={(afternoon) => patchSection('feeding', { ...dossier.feeding, afternoon })}
             />
           </View>
         </View>
         <View style={styles.twoColumns}>
           <View style={styles.flexOne}>
-            <FormField
+            <DateTimeField
               label="Noite"
-              placeholder="19:00"
+              mode="time"
+              placeholder="Selecionar"
               value={dossier.feeding.evening}
-              onChangeText={(evening) => patchSection('feeding', { ...dossier.feeding, evening })}
+              onChange={(evening) => patchSection('feeding', { ...dossier.feeding, evening })}
             />
           </View>
           <View style={styles.flexOne}>
-            <FormField
+            <DateTimeField
               label="Outro"
-              placeholder="23:00"
+              mode="time"
+              placeholder="Selecionar"
               value={dossier.feeding.other_time}
-              onChangeText={(other_time) => patchSection('feeding', { ...dossier.feeding, other_time })}
+              onChange={(other_time) => patchSection('feeding', { ...dossier.feeding, other_time })}
             />
           </View>
         </View>
@@ -571,6 +647,7 @@ export default function PetDetailsScreen() {
         />
         <FormField
           label="Horários habituais"
+          hint="Pode informar mais de um horário, por exemplo: 08:00 e 18:30."
           value={dossier.walks.usual_times}
           onChangeText={(usual_times) => patchSection('walks', { ...dossier.walks, usual_times })}
         />
@@ -617,19 +694,21 @@ export default function PetDetailsScreen() {
       <SectionCard title="💤 6. Rotina">
         <View style={styles.twoColumns}>
           <View style={styles.flexOne}>
-            <FormField
+            <DateTimeField
               label="Acorda"
-              placeholder="07:00"
+              mode="time"
+              placeholder="Selecionar"
               value={dossier.routine.wake_time}
-              onChangeText={(wake_time) => patchSection('routine', { ...dossier.routine, wake_time })}
+              onChange={(wake_time) => patchSection('routine', { ...dossier.routine, wake_time })}
             />
           </View>
           <View style={styles.flexOne}>
-            <FormField
+            <DateTimeField
               label="Dorme"
-              placeholder="22:00"
+              mode="time"
+              placeholder="Selecionar"
               value={dossier.routine.sleep_time}
-              onChangeText={(sleep_time) => patchSection('routine', { ...dossier.routine, sleep_time })}
+              onChange={(sleep_time) => patchSection('routine', { ...dossier.routine, sleep_time })}
             />
           </View>
         </View>
@@ -786,7 +865,7 @@ export default function PetDetailsScreen() {
 
       <SectionCard
         title="💉 8.1 Vacinação e prevenção"
-        description="Registre a situação preventiva do pet para que o cuidador conheça riscos e cuidados importantes antes de receber o animal.">
+        description="Selecione as vacinas que constam na carteirinha. Para o MVP não exigimos data de dose; o objetivo é dar ao cuidador uma visão rápida do histórico preventivo.">
         <SingleChoice
           label="Como está a vacinação?"
           value={dossier.preventive_care.vaccination_status}
@@ -801,37 +880,28 @@ export default function PetDetailsScreen() {
             patchSection('preventive_care', { ...dossier.preventive_care, vaccination_status })
           }
         />
-        <FormField
-          label="Vacinas aplicadas / observações"
-          hint="Ex.: V8/V10, antirrábica, gripe, múltipla felina..."
-          multiline
-          value={dossier.preventive_care.vaccines}
-          onChangeText={(vaccines) =>
-            patchSection('preventive_care', { ...dossier.preventive_care, vaccines })
+        <MultiChoice
+          label="Vacinas registradas"
+          values={dossier.preventive_care.vaccines.filter((value) => knownVaccineKeys.includes(value as (typeof knownVaccineKeys)[number]))}
+          options={vaccineOptionsForSpecies(pet.species)}
+          onChange={(vaccines) =>
+            patchSection('preventive_care', {
+              ...dossier.preventive_care,
+              vaccines,
+              other_vaccine: vaccines.includes('other') ? dossier.preventive_care.other_vaccine : '',
+            })
           }
         />
-        <View style={styles.twoColumns}>
-          <View style={styles.flexOne}>
-            <FormField
-              label="Última dose"
-              placeholder="DD/MM/AAAA"
-              value={dossier.preventive_care.last_vaccine_date}
-              onChangeText={(last_vaccine_date) =>
-                patchSection('preventive_care', { ...dossier.preventive_care, last_vaccine_date })
-              }
-            />
-          </View>
-          <View style={styles.flexOne}>
-            <FormField
-              label="Próxima dose"
-              placeholder="DD/MM/AAAA"
-              value={dossier.preventive_care.next_vaccine_date}
-              onChangeText={(next_vaccine_date) =>
-                patchSection('preventive_care', { ...dossier.preventive_care, next_vaccine_date })
-              }
-            />
-          </View>
-        </View>
+        {dossier.preventive_care.vaccines.includes('other') ? (
+          <FormField
+            label="Qual outra vacina?"
+            hint="Digite o nome exatamente como aparece na carteirinha."
+            value={dossier.preventive_care.other_vaccine}
+            onChangeText={(other_vaccine) =>
+              patchSection('preventive_care', { ...dossier.preventive_care, other_vaccine })
+            }
+          />
+        ) : null}
         <SingleChoice
           label="Vermífugo"
           value={dossier.preventive_care.deworming_status}
@@ -847,7 +917,7 @@ export default function PetDetailsScreen() {
         />
         <FormField
           label="Detalhes do vermífugo"
-          hint="Produto, última aplicação e próxima previsão, se souber."
+          hint="Produto e observações, se souber."
           value={dossier.preventive_care.deworming_details}
           onChangeText={(deworming_details) =>
             patchSection('preventive_care', { ...dossier.preventive_care, deworming_details })
@@ -868,7 +938,7 @@ export default function PetDetailsScreen() {
         />
         <FormField
           label="Detalhes do antipulgas / carrapatos"
-          hint="Produto, data da última aplicação e duração esperada."
+          hint="Produto e duração esperada, se souber."
           value={dossier.preventive_care.flea_tick_details}
           onChangeText={(flea_tick_details) =>
             patchSection('preventive_care', { ...dossier.preventive_care, flea_tick_details })
@@ -876,7 +946,7 @@ export default function PetDetailsScreen() {
         />
         <FormField
           label="Carteirinha de vacinação / observações adicionais"
-          hint="Anote informações relevantes da carteirinha. O anexo da foto será incluído na etapa de mídia do dossiê."
+          hint="Anote qualquer informação importante que o cuidador deva saber."
           multiline
           value={dossier.preventive_care.vaccination_card_notes}
           onChangeText={(vaccination_card_notes) =>
@@ -919,6 +989,7 @@ export default function PetDetailsScreen() {
             />
             <FormField
               label="Horário(s)"
+              hint="Pode informar mais de um horário, por exemplo: 08:00 e 20:00."
               value={medication.schedule}
               onChangeText={(schedule) =>
                 patchMedication(index, { ...medication, schedule }, dossier, patchSection)
