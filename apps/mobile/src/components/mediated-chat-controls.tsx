@@ -193,7 +193,7 @@ export function MediatedChatControls({
   }
 
   async function sendQuestion(questionKey: string) {
-    await runAction(`question:${questionKey}`, () =>
+    await runAction(`question:${questionKey}`, async () =>
       supabase.rpc('send_chat_question', {
         p_event_id: eventId,
         p_question_key: questionKey,
@@ -202,7 +202,7 @@ export function MediatedChatControls({
   }
 
   async function sendAnswer(questionMessageId: string, answerKey: string) {
-    await runAction(`answer:${questionMessageId}:${answerKey}`, () =>
+    await runAction(`answer:${questionMessageId}:${answerKey}`, async () =>
       supabase.rpc('send_chat_answer', {
         p_question_message_id: questionMessageId,
         p_answer_key: answerKey,
@@ -211,7 +211,7 @@ export function MediatedChatControls({
   }
 
   async function requestPhoto(petId: string) {
-    await runAction(`photo:${petId}`, () =>
+    await runAction(`photo:${petId}`, async () =>
       supabase.rpc('request_pet_photo', {
         p_event_id: eventId,
         p_pet_id: petId,
