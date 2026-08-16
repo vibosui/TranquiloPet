@@ -55,6 +55,9 @@ function friendlyError(error: unknown) {
   if (normalized.includes('email not confirmed')) {
     return 'Confirme seu e-mail antes de entrar.';
   }
+  if (normalized.includes('email rate limit') || normalized.includes('rate limit exceeded')) {
+    return 'O serviço de autenticação atingiu temporariamente o limite de envio de e-mails. Tente novamente mais tarde.';
+  }
   if (normalized.includes('user already registered')) {
     return 'Já existe uma conta com este e-mail.';
   }
@@ -105,12 +108,37 @@ export function AuthProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     let active = true;
 
-    void supabase.auth.getSession().then(({ data, error: sessionError }) => {
+    async function bootstrapAuth() {
+      const { data, error: sessionError } = await supabase.auth.getSession();
       if (!active) return;
-      if (sessionError) setError(friendlyError(sessionError));
-      setSession(data.session ?? null);
+
+      if (sessionError || !data.session) {
+        if (sessionError) setError(friendlyError(sessionError));
+        setSession(null);
+        setBootstrapping(false);
+        return;
+      }
+
+      // getSession() lê a sessão persistida no aparelho. Validamos o usuário no
+      // servidor para não manter um JWT antigo após exclusão/reset da conta.
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (!active) return;
+
+      if (userError || !userData.user) {
+        await supabase.auth.signOut({ scope: 'local' });
+        if (!active) return;
+        setSession(null);
+        setProfile(null);
+        setError(null);
+        setBootstrapping(false);
+        return;
+      }
+
+      setSession(data.session);
       setBootstrapping(false);
-    });
+    }
+
+    void bootstrapAuth();
 
     const {
       data: { subscription },
