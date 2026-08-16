@@ -77,3 +77,4 @@ replaceOnce(
 
 await writeFile(path, source, 'utf8');
 console.log('Incident controls wired into hosting event screen.');
+// One-shot patch trigger for the current foundation branch.
