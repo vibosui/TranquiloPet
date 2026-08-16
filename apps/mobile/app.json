@@ -47,6 +47,13 @@
           "cameraPermission": "Permita que o Hospeda Patas use a câmera para registrar as evidências solicitadas durante a hospedagem.",
           "microphonePermission": false
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#9E3F0A",
+          "defaultChannel": "hosting-updates"
+        }
       ]
     ],
     "experiments": {
