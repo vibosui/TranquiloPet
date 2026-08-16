@@ -1,4 +1,4 @@
-import { Stack } from 'expo-router';
+import { Stack, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
@@ -7,8 +7,10 @@ import { colors, spacing } from '@/theme/tokens';
 
 function RootNavigator() {
   const { loading, user } = useAuth();
+  const segments = useSegments();
+  const viewingDemo = segments[0] === 'demo';
 
-  if (loading) {
+  if (loading && !viewingDemo) {
     return (
       <View accessibilityLiveRegion="polite" style={styles.loading}>
         <ActivityIndicator color={colors.primary} size="large" />
@@ -20,6 +22,7 @@ function RootNavigator() {
 
   return (
     <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="demo" />
       <Stack.Protected guard={!user}>
         <Stack.Screen name="(auth)" />
       </Stack.Protected>
