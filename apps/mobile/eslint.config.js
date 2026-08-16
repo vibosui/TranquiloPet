@@ -9,7 +9,7 @@ module.exports = defineConfig([
   },
   {
     // Nullable schedule entries are clearer as Array<Date | null> than (Date | null)[].
-    files: ['src/app/(app)/hosting/[eventId].tsx'],
+    files: ['src/app/**/hosting/[[]eventId[]].tsx'],
     rules: {
       '@typescript-eslint/array-type': ['error', { default: 'array-simple' }],
     },
