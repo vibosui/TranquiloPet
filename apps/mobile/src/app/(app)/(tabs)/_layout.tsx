@@ -39,7 +39,9 @@ export default function TabsLayout() {
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textMuted,
         tabBarHideOnKeyboard: true,
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '800' },
+        tabBarLabelPosition: 'below-icon',
+        tabBarItemStyle: { minWidth: 0 },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '800', textAlign: 'center' },
         tabBarStyle: {
           minHeight: 62,
           paddingTop: 6,
