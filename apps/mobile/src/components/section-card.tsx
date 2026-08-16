@@ -41,6 +41,8 @@ export function SectionCard({
 
 const styles = StyleSheet.create({
   card: {
+    width: '100%',
+    minWidth: 0,
     padding: spacing.lg,
     borderWidth: 1,
     borderColor: colors.border,
@@ -49,6 +51,8 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
   },
   header: {
+    width: '100%',
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
@@ -56,6 +60,7 @@ const styles = StyleSheet.create({
   },
   headingCopy: {
     flex: 1,
+    minWidth: 0,
   },
   title: {
     color: colors.text,
@@ -70,6 +75,8 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   content: {
+    width: '100%',
+    minWidth: 0,
     gap: spacing.md,
   },
 });
