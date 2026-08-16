@@ -48,6 +48,8 @@
     "start:tunnel": "expo start --tunnel",
     "android": "expo start --android",
     "ios": "expo start --ios",
+    "ios:device": "expo start --tunnel",
+    "export:ios": "expo export --platform ios --output-dir dist/ios",
     "web": "expo start --web",
     "lint": "eslint src --max-warnings=0",
     "typecheck": "tsc --noEmit",
