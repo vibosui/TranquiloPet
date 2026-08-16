@@ -16,6 +16,9 @@ ios/
 *.p12
 *.key
 
+# Generated presentation artifacts
+artifacts/event/
+
 # Tests and tooling
 coverage/
 *.log
