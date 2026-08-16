@@ -62,6 +62,8 @@ FormField.displayName = 'FormField';
 
 const styles = StyleSheet.create({
   container: {
+    width: '100%',
+    minWidth: 0,
     gap: spacing.sm,
   },
   label: {
@@ -73,6 +75,8 @@ const styles = StyleSheet.create({
     color: colors.error,
   },
   input: {
+    width: '100%',
+    minWidth: 0,
     minHeight: 52,
     paddingHorizontal: spacing.lg,
     borderWidth: 1,
