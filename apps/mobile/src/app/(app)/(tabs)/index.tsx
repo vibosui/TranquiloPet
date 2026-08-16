@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { PrimaryButton } from '@/components/primary-button';
@@ -14,6 +14,7 @@ type Summary = {
   contacts: number;
   hostingEvents: number;
   activeEvents: number;
+  unreadNotifications: number;
 };
 
 const emptySummary: Summary = {
@@ -21,41 +22,57 @@ const emptySummary: Summary = {
   contacts: 0,
   hostingEvents: 0,
   activeEvents: 0,
+  unreadNotifications: 0,
 };
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const [summary, setSummary] = useState(emptySummary);
 
+  const loadSummary = useCallback(async () => {
+    if (!user?.id) return;
+    const [petsResult, contactsResult, eventsResult, activeResult, notificationsResult] = await Promise.all([
+      supabase.from('pets').select('id', { count: 'exact', head: true }),
+      supabase.from('connections').select('id', { count: 'exact', head: true }).eq('status', 'accepted'),
+      supabase.from('hosting_events').select('id', { count: 'exact', head: true }),
+      supabase
+        .from('hosting_events')
+        .select('id', { count: 'exact', head: true })
+        .in('status', ['accepted', 'in_progress']),
+      supabase
+        .from('notifications')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .is('read_at', null),
+    ]);
+
+    setSummary({
+      pets: petsResult.count ?? 0,
+      contacts: contactsResult.count ?? 0,
+      hostingEvents: eventsResult.count ?? 0,
+      activeEvents: activeResult.count ?? 0,
+      unreadNotifications: notificationsResult.count ?? 0,
+    });
+  }, [user?.id]);
+
   useEffect(() => {
-    let active = true;
-
-    async function loadSummary() {
-      const [petsResult, contactsResult, eventsResult, activeResult] = await Promise.all([
-        supabase.from('pets').select('id', { count: 'exact', head: true }),
-        supabase.from('connections').select('id', { count: 'exact', head: true }).eq('status', 'accepted'),
-        supabase.from('hosting_events').select('id', { count: 'exact', head: true }),
-        supabase
-          .from('hosting_events')
-          .select('id', { count: 'exact', head: true })
-          .in('status', ['accepted', 'in_progress']),
-      ]);
-
-      if (!active) return;
-      setSummary({
-        pets: petsResult.count ?? 0,
-        contacts: contactsResult.count ?? 0,
-        hostingEvents: eventsResult.count ?? 0,
-        activeEvents: activeResult.count ?? 0,
-      });
-    }
-
     void loadSummary();
+    if (!user?.id) return;
+
+    const channel = supabase
+      .channel(`home-notifications:${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
+        () => void loadSummary(),
+      )
+      .subscribe();
+
     return () => {
-      active = false;
+      void supabase.removeChannel(channel);
     };
-  }, []);
+  }, [loadSummary, user?.id]);
 
   const firstName = profile?.full_name.trim().split(/\s+/)[0] || 'por aqui';
 
@@ -78,6 +95,29 @@ export default function HomeScreen() {
         <MetricCard label="Em cuidado" value={summary.activeEvents} />
         <MetricCard label="Contatos" value={summary.contacts} />
       </View>
+
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => router.push('/notifications')}
+        style={({ pressed }) => [styles.notificationCard, pressed && styles.actionPressed]}>
+        <View style={styles.notificationIcon}>
+          <Text style={styles.notificationGlyph}>🔔</Text>
+        </View>
+        <View style={styles.actionCopy}>
+          <Text style={styles.actionTitle}>Notificações</Text>
+          <Text style={styles.actionDescription}>
+            {summary.unreadNotifications
+              ? `${summary.unreadNotifications} atualização(ões) não lida(s)`
+              : 'Você está em dia com as hospedagens'}
+          </Text>
+        </View>
+        {summary.unreadNotifications ? (
+          <View style={styles.notificationBadge}>
+            <Text style={styles.notificationBadgeText}>{Math.min(summary.unreadNotifications, 99)}</Text>
+          </View>
+        ) : null}
+        <Text style={styles.actionArrow}>›</Text>
+      </Pressable>
 
       {profile?.public_code ? (
         <SectionCard
@@ -202,6 +242,36 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
   },
+  notificationCard: {
+    minHeight: 76,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: radii.lg,
+    backgroundColor: colors.surface,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  notificationIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: radii.round,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notificationGlyph: { fontSize: 20 },
+  notificationBadge: {
+    minWidth: 24,
+    height: 24,
+    paddingHorizontal: 6,
+    borderRadius: radii.round,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notificationBadgeText: { color: colors.surface, fontSize: 10, fontWeight: '900' },
   codeCard: {
     padding: spacing.lg,
     borderRadius: radii.md,
@@ -237,10 +307,11 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   actionPressed: {
-    backgroundColor: colors.primarySoft,
+    opacity: 0.75,
   },
   actionCopy: {
     flex: 1,
+    minWidth: 0,
   },
   actionTitle: {
     color: colors.text,
