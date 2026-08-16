@@ -26,6 +26,7 @@ export const planShortFeatures = (plan: CarePlan) => {
 };
 
 export const planName = (code: string | null | undefined) => {
+  if (code === 'legacy') return 'Pré-planos';
   if (code === 'care_plus') return 'Cuidado+';
   if (code === 'premium') return 'Premium';
   return 'Essencial';
