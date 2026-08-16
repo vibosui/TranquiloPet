@@ -1,8 +1,10 @@
 import * as ImagePicker from 'expo-image-picker';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { PhotoLightbox } from '@/components/photo-lightbox';
 import { useAuth } from '@/core/auth/auth-context';
 import { supabase } from '@/core/supabase/client';
 import { planName } from '@/features/hosting/plans';
@@ -36,6 +38,18 @@ type ProgressRow = {
   video_max_seconds: number;
 };
 
+type PlanMedia = {
+  id: string;
+  event_id: string;
+  pet_id: string;
+  plan_period_id: string;
+  media_type: 'photo' | 'video';
+  storage_path: string;
+  duration_seconds: number | null;
+  created_at: string;
+  signedUrl?: string;
+};
+
 type Props = {
   eventId: string;
   eventStatus: HostingStatus;
@@ -58,22 +72,47 @@ function formatPeriod(start: string, end: string) {
   return `${formatter.format(new Date(start))} → ${formatter.format(new Date(end))}`;
 }
 
+function formatTime(value: string) {
+  return new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(new Date(value));
+}
+
 export function PlanCareControls({ eventId, eventStatus, isCaregiver, pets, onChanged }: Props) {
   const router = useRouter();
   const { user } = useAuth();
   const [progress, setProgress] = useState<ProgressRow[]>([]);
+  const [media, setMedia] = useState<PlanMedia[]>([]);
+  const [expandedPhoto, setExpandedPhoto] = useState<{ uri: string; caption: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const { data, error: progressError } = await supabase.rpc('get_event_plan_progress', { p_event_id: eventId });
-    if (progressError) {
+    const [progressResult, mediaResult] = await Promise.all([
+      supabase.rpc('get_event_plan_progress', { p_event_id: eventId }),
+      supabase
+        .from('event_plan_media')
+        .select('id, event_id, pet_id, plan_period_id, media_type, storage_path, duration_seconds, created_at')
+        .eq('event_id', eventId)
+        .order('created_at', { ascending: true }),
+    ]);
+
+    if (progressResult.error || mediaResult.error) {
       setError('Não foi possível atualizar o acompanhamento do plano.');
-    } else {
-      setProgress((data ?? []) as ProgressRow[]);
-      setError(null);
+      setLoading(false);
+      return;
     }
+
+    const rawMedia = (mediaResult.data ?? []) as PlanMedia[];
+    const signedMedia = await Promise.all(
+      rawMedia.map(async (item) => {
+        const { data } = await supabase.storage.from('event-updates').createSignedUrl(item.storage_path, 60 * 60);
+        return { ...item, signedUrl: data?.signedUrl };
+      }),
+    );
+
+    setProgress((progressResult.data ?? []) as ProgressRow[]);
+    setMedia(signedMedia);
+    setError(null);
     setLoading(false);
   }, [eventId]);
 
@@ -96,6 +135,12 @@ export function PlanCareControls({ eventId, eventStatus, isCaregiver, pets, onCh
     setError(null);
 
     try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        setError('A câmera precisa ser autorizada para registrar o acompanhamento.');
+        return;
+      }
+
       const result = await ImagePicker.launchCameraAsync(
         mediaType === 'video'
           ? {
@@ -159,62 +204,102 @@ export function PlanCareControls({ eventId, eventStatus, isCaregiver, pets, onCh
   }
 
   return (
-    <View style={styles.container}>
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      {pets.map((pet) => {
-        const rows = grouped.get(pet.pet_id) ?? [];
-        if (!rows.length) return null;
-        const current = rows.find((row) => {
-          const now = Date.now();
-          return now >= new Date(row.starts_at).getTime() && now <= new Date(row.ends_at).getTime();
-        }) ?? rows.find((row) => row.photos_done < row.min_photos || row.videos_done < row.min_videos || (row.activity_required && !row.activity_done)) ?? rows[rows.length - 1];
+    <>
+      <View style={styles.container}>
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+        {pets.map((pet) => {
+          const rows = grouped.get(pet.pet_id) ?? [];
+          if (!rows.length) return null;
+          const current = rows.find((row) => {
+            const now = Date.now();
+            return now >= new Date(row.starts_at).getTime() && now <= new Date(row.ends_at).getTime();
+          }) ?? rows.find((row) => row.photos_done < row.min_photos || row.videos_done < row.min_videos || (row.activity_required && !row.activity_done)) ?? rows[rows.length - 1];
+          const currentMedia = media.filter((item) => item.plan_period_id === current.period_id);
 
-        return (
-          <View key={pet.pet_id} style={styles.petCard}>
-            <View style={styles.petHeader}>
-              <View style={styles.copy}>
-                <Text style={styles.petName}>{current.pet_name}</Text>
-                <Text style={styles.planBadge}>{planName(current.plan_code)}</Text>
+          return (
+            <View key={pet.pet_id} style={styles.petCard}>
+              <View style={styles.petHeader}>
+                <View style={styles.copy}>
+                  <Text style={styles.petName}>{current.pet_name}</Text>
+                  <Text style={styles.planBadge}>{planName(current.plan_code)}</Text>
+                </View>
+                <Text style={styles.periodBadge}>Período {current.sequence_no}</Text>
               </View>
-              <Text style={styles.periodBadge}>Período {current.sequence_no}</Text>
-            </View>
-            <Text style={styles.period}>{formatPeriod(current.starts_at, current.ends_at)}</Text>
+              <Text style={styles.period}>{formatPeriod(current.starts_at, current.ends_at)}</Text>
 
-            <View style={styles.metrics}>
-              <Metric label="Fotos" value={`${current.photos_done}/${current.min_photos} mín.`} done={current.photos_done >= current.min_photos} />
-              {current.min_videos > 0 ? <Metric label="Vídeos" value={`${current.videos_done}/${current.min_videos} mín.`} done={current.videos_done >= current.min_videos} /> : null}
-              {current.activity_required ? <Metric label="Atividade" value={current.activity_done ? 'Concluída' : 'Pendente'} done={current.activity_done} /> : null}
-            </View>
+              <View style={styles.metrics}>
+                <Metric label="Fotos" value={`${current.photos_done}/${current.min_photos} mín.`} done={current.photos_done >= current.min_photos} />
+                {current.min_videos > 0 ? <Metric label="Vídeos" value={`${current.videos_done}/${current.min_videos} mín.`} done={current.videos_done >= current.min_videos} /> : null}
+                {current.activity_required ? <Metric label="Atividade" value={current.activity_done ? 'Concluída' : 'Pendente'} done={current.activity_done} /> : null}
+              </View>
 
-            <Text style={styles.muted}>Fotos de tarefas e fotos solicitadas pelo tutor também contam para o mínimo deste período.</Text>
+              <Text style={styles.muted}>Fotos de tarefas e fotos solicitadas pelo tutor também contam para o mínimo deste período.</Text>
 
-            {isCaregiver && eventStatus === 'in_progress' ? (
-              <View style={styles.actions}>
-                <Pressable disabled={Boolean(busyKey)} onPress={() => void captureMedia(pet.pet_id, 'photo', current.video_max_seconds)} style={({ pressed }) => [styles.actionButton, pressed && styles.pressed]}>
-                  <Text style={styles.actionText}>{busyKey === `${pet.pet_id}:photo` ? 'Enviando...' : '📷 Registrar foto'}</Text>
-                </Pressable>
-                {current.min_videos > 0 ? (
-                  <Pressable disabled={Boolean(busyKey)} onPress={() => void captureMedia(pet.pet_id, 'video', current.video_max_seconds)} style={({ pressed }) => [styles.actionButton, pressed && styles.pressed]}>
-                    <Text style={styles.actionText}>{busyKey === `${pet.pet_id}:video` ? 'Enviando...' : `🎥 Vídeo até ${current.video_max_seconds}s`}</Text>
+              {isCaregiver && eventStatus === 'in_progress' ? (
+                <View style={styles.actions}>
+                  <Pressable disabled={Boolean(busyKey)} onPress={() => void captureMedia(pet.pet_id, 'photo', current.video_max_seconds)} style={({ pressed }) => [styles.actionButton, pressed && styles.pressed]}>
+                    <Text style={styles.actionText}>{busyKey === `${pet.pet_id}:photo` ? 'Enviando...' : '📷 Registrar foto'}</Text>
                   </Pressable>
-                ) : null}
-              </View>
-            ) : null}
-          </View>
-        );
-      })}
+                  {current.min_videos > 0 ? (
+                    <Pressable disabled={Boolean(busyKey)} onPress={() => void captureMedia(pet.pet_id, 'video', current.video_max_seconds)} style={({ pressed }) => [styles.actionButton, pressed && styles.pressed]}>
+                      <Text style={styles.actionText}>{busyKey === `${pet.pet_id}:video` ? 'Enviando...' : `🎥 Vídeo até ${current.video_max_seconds}s`}</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              ) : null}
 
-      {hasPremiumReport ? (
-        <Pressable accessibilityRole="button" onPress={() => router.push({ pathname: '/hosting/[eventId]/report', params: { eventId } })} style={({ pressed }) => [styles.reportButton, pressed && styles.pressed]}>
-          <View style={styles.copy}>
-            <Text style={styles.reportTitle}>📄 Relatório automático</Text>
-            <Text style={styles.muted}>Linha do tempo com horários, mensagens mediadas, tarefas, ocorrências, fotos, vídeos e indicadores.</Text>
-          </View>
-          <Text style={styles.arrow}>›</Text>
-        </Pressable>
-      ) : null}
-    </View>
+              {currentMedia.length ? (
+                <View style={styles.mediaBlock}>
+                  <Text style={styles.mediaTitle}>Registros deste período</Text>
+                  <View style={styles.mediaList}>
+                    {currentMedia.map((item) => item.media_type === 'photo' && item.signedUrl ? (
+                      <Pressable
+                        key={item.id}
+                        accessibilityLabel={`Ampliar foto registrada às ${formatTime(item.created_at)}`}
+                        accessibilityRole="button"
+                        onPress={() => setExpandedPhoto({ uri: item.signedUrl!, caption: `${current.pet_name} • ${formatTime(item.created_at)}` })}
+                        style={({ pressed }) => [styles.photoTile, pressed && styles.pressed]}>
+                        <Image source={{ uri: item.signedUrl }} style={styles.photo} />
+                        <Text style={styles.mediaTime}>📷 {formatTime(item.created_at)}</Text>
+                      </Pressable>
+                    ) : item.media_type === 'video' && item.signedUrl ? (
+                      <View key={item.id} style={styles.videoTile}>
+                        <PlanVideo uri={item.signedUrl} />
+                        <Text style={styles.mediaTime}>🎥 {formatTime(item.created_at)}{item.duration_seconds ? ` • ${item.duration_seconds.toFixed(1)}s` : ''}</Text>
+                      </View>
+                    ) : null)}
+                  </View>
+                </View>
+              ) : null}
+            </View>
+          );
+        })}
+
+        {hasPremiumReport ? (
+          <Pressable accessibilityRole="button" onPress={() => router.push({ pathname: '/hosting/[eventId]/report', params: { eventId } })} style={({ pressed }) => [styles.reportButton, pressed && styles.pressed]}>
+            <View style={styles.copy}>
+              <Text style={styles.reportTitle}>📄 Relatório automático</Text>
+              <Text style={styles.muted}>Linha do tempo com horários, mensagens mediadas, tarefas, ocorrências, fotos, vídeos e indicadores.</Text>
+            </View>
+            <Text style={styles.arrow}>›</Text>
+          </Pressable>
+        ) : null}
+      </View>
+
+      <PhotoLightbox
+        uri={expandedPhoto?.uri ?? null}
+        caption={expandedPhoto?.caption}
+        onClose={() => setExpandedPhoto(null)}
+      />
+    </>
   );
+}
+
+function PlanVideo({ uri }: { uri: string }) {
+  const player = useVideoPlayer(uri, (instance) => {
+    instance.loop = false;
+  });
+  return <VideoView player={player} style={styles.video} nativeControls allowsFullscreen />;
 }
 
 function Metric({ label, value, done }: { label: string; value: string; done: boolean }) {
@@ -246,6 +331,14 @@ const styles = StyleSheet.create({
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   actionButton: { flexGrow: 1, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radii.md, backgroundColor: colors.primary },
   actionText: { color: colors.surface, fontSize: 11, fontWeight: '900', textAlign: 'center' },
+  mediaBlock: { gap: spacing.sm },
+  mediaTitle: { color: colors.text, fontSize: 11, fontWeight: '900' },
+  mediaList: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  photoTile: { width: 128, gap: spacing.xs },
+  photo: { width: 128, height: 96, borderRadius: radii.md, backgroundColor: colors.surfaceMuted },
+  videoTile: { width: 220, gap: spacing.xs },
+  video: { width: 220, height: 150, borderRadius: radii.md },
+  mediaTime: { color: colors.textMuted, fontSize: 9, fontWeight: '700' },
   reportButton: { padding: spacing.md, borderRadius: radii.lg, backgroundColor: colors.accentSoft, flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   reportTitle: { color: colors.text, fontSize: 13, fontWeight: '900' },
   arrow: { color: colors.primary, fontSize: 26 },
