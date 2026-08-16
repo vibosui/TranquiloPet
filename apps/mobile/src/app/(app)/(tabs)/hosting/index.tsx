@@ -46,11 +46,22 @@ export default function HostingListScreen() {
     if (showLoading) setLoading(true);
     setError(null);
 
-    const { data, error: queryError } = await supabase
-      .from('hosting_events')
-      .select('id, title, status, starts_at, ends_at')
-      .or(`tutor_id.eq.${user.id},caregiver_id.eq.${user.id}`)
-      .order('created_at', { ascending: false });
+    const { data: authenticated, error: authError } = await supabase.auth.getUser();
+    if (authError || !authenticated.user) {
+      setEvents([]);
+      setError('Sua sessão não pôde ser validada. Entre novamente para carregar as hospedagens.');
+      setLoading(false);
+      return;
+    }
+
+    if (authenticated.user.id !== user.id) {
+      setEvents([]);
+      setError('A sessão ativa não corresponde ao perfil exibido. Saia e entre novamente.');
+      setLoading(false);
+      return;
+    }
+
+    const { data, error: queryError } = await supabase.rpc('list_my_hosting_events');
 
     if (queryError) {
       setError('Não foi possível carregar suas hospedagens.');
