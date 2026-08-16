@@ -116,3 +116,4 @@ await patchFile('apps/mobile/src/app/(app)/contacts/index.tsx', [
 ]);
 
 console.log('Care plan UI wiring applied.');
+// One-shot trigger after workflow creation.
