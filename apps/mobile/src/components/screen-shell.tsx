@@ -113,14 +113,19 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     width: '100%',
     maxWidth: 560,
+    minWidth: 0,
     alignSelf: 'center',
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.xxl,
   },
   header: {
+    width: '100%',
+    minWidth: 0,
     paddingBottom: spacing.xl,
   },
   headerActions: {
+    width: '100%',
+    minWidth: 0,
     minHeight: 56,
     flexDirection: 'row',
     alignItems: 'center',
@@ -146,6 +151,8 @@ const styles = StyleSheet.create({
     lineHeight: 34,
   },
   heading: {
+    width: '100%',
+    minWidth: 0,
     paddingTop: spacing.md,
   },
   eyebrow: {
@@ -169,9 +176,13 @@ const styles = StyleSheet.create({
   },
   body: {
     flex: 1,
+    width: '100%',
+    minWidth: 0,
     gap: spacing.lg,
   },
   footer: {
+    width: '100%',
+    minWidth: 0,
     paddingTop: spacing.xl,
   },
 });

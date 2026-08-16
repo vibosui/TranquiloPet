@@ -1,0 +1,52 @@
+name: Mobile CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'agent/**'
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  mobile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Reset script syntax
+        run: node --check scripts/reset-dev-database.mjs
+
+      - name: Event QR generation
+        env:
+          HOSPEDA_PATAS_EVENT_HOST: 192.168.0.10
+          HOSPEDA_PATAS_EVENT_QR_ONLY: '1'
+        run: node scripts/start-event-demo.mjs
+
+      - name: TypeScript
+        run: npm run typecheck
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: iOS bundle
+        run: npm run export:ios
+
+      - name: Web demo bundle
+        run: npm run export:web
+
+      - name: Jest
+        run: npm test

@@ -16,6 +16,9 @@ ios/
 *.p12
 *.key
 
+# Generated presentation artifacts
+artifacts/event/
+
 # Tests and tooling
 coverage/
 *.log
@@ -35,6 +38,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
+!.env.reset.example
 
 # Supabase local state
 supabase/.branches/
