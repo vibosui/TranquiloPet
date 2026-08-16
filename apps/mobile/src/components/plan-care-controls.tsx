@@ -120,6 +120,27 @@ export function PlanCareControls({ eventId, eventStatus, isCaregiver, pets, onCh
     void load();
   }, [load]);
 
+  useEffect(() => {
+    const refresh = () => void load();
+    const channel = supabase
+      .channel(`care-plan-progress:${eventId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'event_tasks', filter: `event_id=eq.${eventId}` },
+        refresh,
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'event_plan_media', filter: `event_id=eq.${eventId}` },
+        refresh,
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [eventId, load]);
+
   const grouped = useMemo(() => {
     const map = new Map<string, ProgressRow[]>();
     progress.forEach((row) => map.set(row.pet_id, [...(map.get(row.pet_id) ?? []), row]));
