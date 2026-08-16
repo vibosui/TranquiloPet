@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
 
 import { PrimaryButton } from '@/components/primary-button';
 import { ScreenShell } from '@/components/screen-shell';
 import { SectionCard } from '@/components/section-card';
+import { useAuth } from '@/core/auth/auth-context';
 import { supabase } from '@/core/supabase/client';
 import { colors, radii, spacing } from '@/theme/tokens';
 
@@ -32,16 +33,24 @@ const sizeLabel: Record<string, string> = {
 
 export default function MyPetsScreen() {
   const router = useRouter();
+  const { user, profile } = useAuth();
   const [pets, setPets] = useState<PetRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const loadPets = useCallback(async () => {
+    if (!user) {
+      setPets([]);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     const { data, error: queryError } = await supabase
       .from('pets')
       .select('id, name, species, breed, size, approximate_weight_kg, identification_notes')
+      .eq('owner_id', user.id)
       .order('created_at', { ascending: true });
 
     if (queryError) {
@@ -50,17 +59,27 @@ export default function MyPetsScreen() {
       setPets((data ?? []) as PetRow[]);
     }
     setLoading(false);
-  }, []);
+  }, [user]);
 
-  useEffect(() => {
-    void loadPets();
-  }, [loadPets]);
+  useFocusEffect(
+    useCallback(() => {
+      void loadPets();
+    }, [loadPets]),
+  );
 
   return (
     <ScreenShell
       eyebrow="MEUS PETS"
       title="Conheça meu pet"
-      subtitle="O dossiê guarda rotina, comportamento, alimentação, saúde e tudo que o cuidador precisa conhecer antes da hospedagem.">
+      subtitle="Aqui ficam somente os pets que pertencem à sua conta. Pets recebidos para hospedagem aparecem em um painel separado do cuidador.">
+      {profile?.caregiver_enabled ? (
+        <SectionCard
+          title="🐾 Pets sob meus cuidados"
+          description="Consulte, em modo somente leitura, os snapshots dos pets vinculados às hospedagens aceitas ou em andamento.">
+          <PrimaryButton label="Abrir painel do cuidador" onPress={() => router.push('/pets/care')} />
+        </SectionCard>
+      ) : null}
+
       {loading ? (
         <View style={styles.loading}>
           <ActivityIndicator color={colors.primary} />
@@ -71,8 +90,8 @@ export default function MyPetsScreen() {
         </SectionCard>
       ) : pets.length === 0 ? (
         <SectionCard
-          title="Nenhum pet cadastrado"
-          description="Comece pela identificação. Depois vamos completar o checklist Conheça meu Pet com rotina, saúde, alimentação e emergência.">
+          title="Nenhum pet seu cadastrado"
+          description="Esta área mostra apenas pets cadastrados por você. Se você está cuidando do pet de outra pessoa, use o painel Pets sob meus cuidados acima.">
           <PrimaryButton label="Cadastrar meu pet" onPress={() => router.push('/pets/new')} />
         </SectionCard>
       ) : (
@@ -87,19 +106,27 @@ export default function MyPetsScreen() {
               }
               style={({ pressed }) => [styles.petCard, pressed && styles.petCardPressed]}>
               <View style={styles.petIcon}>
-                <Text style={styles.petEmoji}>{pet.species === 'cat' ? '🐱' : pet.species === 'dog' ? '🐶' : '🐾'}</Text>
+                <Text style={styles.petEmoji}>
+                  {pet.species === 'cat' ? '🐱' : pet.species === 'dog' ? '🐶' : '🐾'}
+                </Text>
               </View>
               <View style={styles.petCopy}>
                 <Text style={styles.petName}>{pet.name}</Text>
                 <Text style={styles.petDetail}>
-                  {[speciesLabel[pet.species] ?? pet.species, pet.breed, pet.size ? sizeLabel[pet.size] : null]
+                  {[
+                    speciesLabel[pet.species] ?? pet.species,
+                    pet.breed,
+                    pet.size ? sizeLabel[pet.size] : null,
+                  ]
                     .filter(Boolean)
                     .join(' • ')}
                 </Text>
                 {pet.identification_notes ? (
-                  <Text numberOfLines={2} style={styles.petNotes}>{pet.identification_notes}</Text>
+                  <Text numberOfLines={2} style={styles.petNotes}>
+                    {pet.identification_notes}
+                  </Text>
                 ) : null}
-                <Text style={styles.openHint}>Abrir dossiê →</Text>
+                <Text style={styles.openHint}>Abrir e editar meu dossiê →</Text>
               </View>
             </Pressable>
           ))}
@@ -109,7 +136,7 @@ export default function MyPetsScreen() {
 
       <SectionCard
         title="Como o dossiê será usado"
-        description="Ao criar uma hospedagem, o Hospeda Patas salva uma cópia das informações daquele momento. Mudanças futuras no perfil do pet não alteram o histórico do evento." />
+        description="Ao criar uma hospedagem, o Hospeda Patas salva uma cópia das informações daquele momento. O cuidador consulta essa cópia, sem poder alterar o cadastro original do pet." />
     </ScreenShell>
   );
 }
@@ -149,6 +176,7 @@ const styles = StyleSheet.create({
   },
   petCopy: {
     flex: 1,
+    minWidth: 0,
   },
   petName: {
     color: colors.text,
