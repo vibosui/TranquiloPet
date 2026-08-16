@@ -1,10 +1,11 @@
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { PrimaryButton } from '@/components/primary-button';
 import { ScreenShell } from '@/components/screen-shell';
 import { SectionCard } from '@/components/section-card';
+import { useAuth } from '@/core/auth/auth-context';
 import { supabase } from '@/core/supabase/client';
 import { colors, radii, spacing } from '@/theme/tokens';
 
@@ -35,16 +36,20 @@ function formatPeriod(start: string | null, end: string | null) {
 
 export default function HostingListScreen() {
   const router = useRouter();
+  const { user } = useAuth();
   const [events, setEvents] = useState<HostingEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const loadEvents = useCallback(async () => {
-    setLoading(true);
+  const loadEvents = useCallback(async (showLoading = true) => {
+    if (!user) return;
+    if (showLoading) setLoading(true);
     setError(null);
+
     const { data, error: queryError } = await supabase
       .from('hosting_events')
       .select('id, title, status, starts_at, ends_at')
+      .or(`tutor_id.eq.${user.id},caregiver_id.eq.${user.id}`)
       .order('created_at', { ascending: false });
 
     if (queryError) {
@@ -53,11 +58,34 @@ export default function HostingListScreen() {
       setEvents((data ?? []) as HostingEvent[]);
     }
     setLoading(false);
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     void loadEvents();
   }, [loadEvents]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadEvents(false);
+    }, [loadEvents]),
+  );
+
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel(`hosting-list:${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'hosting_events' },
+        () => void loadEvents(false),
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [loadEvents, user]);
 
   return (
     <ScreenShell
