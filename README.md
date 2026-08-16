@@ -59,13 +59,15 @@ O dossiê reúne dados que tendem a permanecer válidos entre hospedagens:
 4. água;
 5. passeios;
 6. rotina;
+   - 6.1 higiene e necessidades: hábito de xixi/cocô, local habitual, acidentes, sinais e frequência;
 7. brinquedos e objetos de apego;
 8. saúde;
+   - 8.1 vacinação e prevenção: situação vacinal, doses, vermífugo e antipulgas/carrapatos;
 9. medicamentos;
 10. contatos e autorização de emergência;
 11. observações adicionais.
 
-Quando uma hospedagem é criada, o estado atual do dossiê é copiado para um snapshot do evento. Alterações posteriores no perfil do pet não reescrevem o histórico de uma hospedagem passada.
+A estrutura do dossiê está atualmente na versão `2`. Quando uma hospedagem é criada, o estado atual do dossiê é copiado para um snapshot do evento. Alterações posteriores no perfil do pet não reescrevem o histórico de uma hospedagem passada.
 
 ### Preparação da hospedagem
 
