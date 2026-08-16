@@ -62,6 +62,14 @@ type PetDossier = {
     alone_duration: string;
     habits: string;
   };
+  hygiene: {
+    toilet_training: string;
+    urine_place: string;
+    stool_place: string;
+    signals_to_go_out: NullableBoolean;
+    usual_frequency: string;
+    instructions: string;
+  };
   objects: {
     attachment_objects: string[];
     description: string;
@@ -72,6 +80,17 @@ type PetDossier = {
     allergies: string;
     dietary_restrictions: string;
     surgery_or_other: string;
+  };
+  preventive_care: {
+    vaccination_status: string;
+    vaccines: string;
+    last_vaccine_date: string;
+    next_vaccine_date: string;
+    deworming_status: string;
+    deworming_details: string;
+    flea_tick_status: string;
+    flea_tick_details: string;
+    vaccination_card_notes: string;
   };
   medications: Medication[];
   emergency: {
@@ -145,6 +164,14 @@ const emptyDossier: PetDossier = {
     alone_duration: '',
     habits: '',
   },
+  hygiene: {
+    toilet_training: '',
+    urine_place: '',
+    stool_place: '',
+    signals_to_go_out: null,
+    usual_frequency: '',
+    instructions: '',
+  },
   objects: {
     attachment_objects: [],
     description: '',
@@ -155,6 +182,17 @@ const emptyDossier: PetDossier = {
     allergies: '',
     dietary_restrictions: '',
     surgery_or_other: '',
+  },
+  preventive_care: {
+    vaccination_status: '',
+    vaccines: '',
+    last_vaccine_date: '',
+    next_vaccine_date: '',
+    deworming_status: '',
+    deworming_details: '',
+    flea_tick_status: '',
+    flea_tick_details: '',
+    vaccination_card_notes: '',
   },
   medications: [],
   emergency: {
@@ -170,7 +208,7 @@ const emptyDossier: PetDossier = {
     authorization: '',
   },
   additional_notes: '',
-  dossier_version: 1,
+  dossier_version: 2,
 };
 
 function normalizeDossier(input: Partial<PetDossier> | null | undefined): PetDossier {
@@ -180,12 +218,14 @@ function normalizeDossier(input: Partial<PetDossier> | null | undefined): PetDos
     water: { ...emptyDossier.water, ...(input?.water ?? {}) },
     walks: { ...emptyDossier.walks, ...(input?.walks ?? {}) },
     routine: { ...emptyDossier.routine, ...(input?.routine ?? {}) },
+    hygiene: { ...emptyDossier.hygiene, ...(input?.hygiene ?? {}) },
     objects: { ...emptyDossier.objects, ...(input?.objects ?? {}) },
     health: { ...emptyDossier.health, ...(input?.health ?? {}) },
+    preventive_care: { ...emptyDossier.preventive_care, ...(input?.preventive_care ?? {}) },
     medications: Array.isArray(input?.medications) ? input.medications : [],
     emergency: { ...emptyDossier.emergency, ...(input?.emergency ?? {}) },
     additional_notes: input?.additional_notes ?? '',
-    dossier_version: 1,
+    dossier_version: 2,
   };
 }
 
@@ -236,12 +276,24 @@ export default function PetDetailsScreen() {
       dossier.water.drinks_normally !== null || Boolean(dossier.water.special_instructions),
       Boolean(dossier.walks.count_per_day),
       Boolean(dossier.routine.wake_time || dossier.routine.sleep_time || dossier.routine.habits),
+      Boolean(
+        dossier.hygiene.toilet_training ||
+          dossier.hygiene.urine_place ||
+          dossier.hygiene.stool_place ||
+          dossier.hygiene.instructions,
+      ),
       dossier.objects.attachment_objects.length > 0 || dossier.objects.bringing_to_hosting !== null,
       Boolean(
         dossier.health.conditions ||
           dossier.health.allergies ||
           dossier.health.dietary_restrictions ||
           dossier.health.surgery_or_other,
+      ),
+      Boolean(
+        dossier.preventive_care.vaccination_status ||
+          dossier.preventive_care.vaccines ||
+          dossier.preventive_care.deworming_status ||
+          dossier.preventive_care.flea_tick_status,
       ),
       dossier.medications.length > 0,
       Boolean(dossier.emergency.tutor_phone || dossier.emergency.contact_phone),
@@ -263,7 +315,7 @@ export default function PetDetailsScreen() {
 
     const { error: updateError } = await supabase
       .from('pets')
-      .update({ dossier })
+      .update({ dossier: { ...dossier, dossier_version: 2 } })
       .eq('id', pet.id);
 
     if (updateError) {
@@ -310,7 +362,11 @@ export default function PetDetailsScreen() {
       </View>
 
       {error ? <ErrorBanner message={error} /> : null}
-      {saved ? <View style={styles.savedBanner}><Text style={styles.savedText}>✓ Dossiê salvo no Supabase.</Text></View> : null}
+      {saved ? (
+        <View style={styles.savedBanner}>
+          <Text style={styles.savedText}>✓ Dossiê salvo no Supabase.</Text>
+        </View>
+      ) : null}
 
       <SectionCard title="🐶 1. Identificação" description="Dados cadastrados na criação do pet.">
         <ReadOnlyRow label="Espécie" value={speciesLabel(pet.species)} />
@@ -424,12 +480,40 @@ export default function PetDetailsScreen() {
         </View>
         <Text style={styles.subheading}>Horários habituais</Text>
         <View style={styles.twoColumns}>
-          <View style={styles.flexOne}><FormField label="Manhã" placeholder="08:00" value={dossier.feeding.morning} onChangeText={(morning) => patchSection('feeding', { ...dossier.feeding, morning })} /></View>
-          <View style={styles.flexOne}><FormField label="Tarde" placeholder="13:00" value={dossier.feeding.afternoon} onChangeText={(afternoon) => patchSection('feeding', { ...dossier.feeding, afternoon })} /></View>
+          <View style={styles.flexOne}>
+            <FormField
+              label="Manhã"
+              placeholder="08:00"
+              value={dossier.feeding.morning}
+              onChangeText={(morning) => patchSection('feeding', { ...dossier.feeding, morning })}
+            />
+          </View>
+          <View style={styles.flexOne}>
+            <FormField
+              label="Tarde"
+              placeholder="13:00"
+              value={dossier.feeding.afternoon}
+              onChangeText={(afternoon) => patchSection('feeding', { ...dossier.feeding, afternoon })}
+            />
+          </View>
         </View>
         <View style={styles.twoColumns}>
-          <View style={styles.flexOne}><FormField label="Noite" placeholder="19:00" value={dossier.feeding.evening} onChangeText={(evening) => patchSection('feeding', { ...dossier.feeding, evening })} /></View>
-          <View style={styles.flexOne}><FormField label="Outro" placeholder="23:00" value={dossier.feeding.other_time} onChangeText={(other_time) => patchSection('feeding', { ...dossier.feeding, other_time })} /></View>
+          <View style={styles.flexOne}>
+            <FormField
+              label="Noite"
+              placeholder="19:00"
+              value={dossier.feeding.evening}
+              onChangeText={(evening) => patchSection('feeding', { ...dossier.feeding, evening })}
+            />
+          </View>
+          <View style={styles.flexOne}>
+            <FormField
+              label="Outro"
+              placeholder="23:00"
+              value={dossier.feeding.other_time}
+              onChangeText={(other_time) => patchSection('feeding', { ...dossier.feeding, other_time })}
+            />
+          </View>
         </View>
         <BooleanChoice
           label="Pode receber petiscos?"
@@ -462,7 +546,9 @@ export default function PetDetailsScreen() {
           label="Orientação especial"
           multiline
           value={dossier.water.special_instructions}
-          onChangeText={(special_instructions) => patchSection('water', { ...dossier.water, special_instructions })}
+          onChangeText={(special_instructions) =>
+            patchSection('water', { ...dossier.water, special_instructions })
+          }
         />
         <FormField
           label="Com que frequência costuma trocar a água?"
@@ -483,8 +569,17 @@ export default function PetDetailsScreen() {
           ]}
           onChange={(count_per_day) => patchSection('walks', { ...dossier.walks, count_per_day })}
         />
-        <FormField label="Horários habituais" value={dossier.walks.usual_times} onChangeText={(usual_times) => patchSection('walks', { ...dossier.walks, usual_times })} />
-        <FormField label="Duração média" placeholder="Ex.: 30 minutos" value={dossier.walks.average_duration} onChangeText={(average_duration) => patchSection('walks', { ...dossier.walks, average_duration })} />
+        <FormField
+          label="Horários habituais"
+          value={dossier.walks.usual_times}
+          onChangeText={(usual_times) => patchSection('walks', { ...dossier.walks, usual_times })}
+        />
+        <FormField
+          label="Duração média"
+          placeholder="Ex.: 30 minutos"
+          value={dossier.walks.average_duration}
+          onChangeText={(average_duration) => patchSection('walks', { ...dossier.walks, average_duration })}
+        />
         <MultiChoice
           label="Utiliza"
           values={dossier.walks.equipment}
@@ -511,13 +606,32 @@ export default function PetDetailsScreen() {
           ]}
           onChange={(behaviors) => patchSection('walks', { ...dossier.walks, behaviors })}
         />
-        <FormField label="Orientação específica para os passeios" multiline value={dossier.walks.instructions} onChangeText={(instructions) => patchSection('walks', { ...dossier.walks, instructions })} />
+        <FormField
+          label="Orientação específica para os passeios"
+          multiline
+          value={dossier.walks.instructions}
+          onChangeText={(instructions) => patchSection('walks', { ...dossier.walks, instructions })}
+        />
       </SectionCard>
 
       <SectionCard title="💤 6. Rotina">
         <View style={styles.twoColumns}>
-          <View style={styles.flexOne}><FormField label="Acorda" placeholder="07:00" value={dossier.routine.wake_time} onChangeText={(wake_time) => patchSection('routine', { ...dossier.routine, wake_time })} /></View>
-          <View style={styles.flexOne}><FormField label="Dorme" placeholder="22:00" value={dossier.routine.sleep_time} onChangeText={(sleep_time) => patchSection('routine', { ...dossier.routine, sleep_time })} /></View>
+          <View style={styles.flexOne}>
+            <FormField
+              label="Acorda"
+              placeholder="07:00"
+              value={dossier.routine.wake_time}
+              onChangeText={(wake_time) => patchSection('routine', { ...dossier.routine, wake_time })}
+            />
+          </View>
+          <View style={styles.flexOne}>
+            <FormField
+              label="Dorme"
+              placeholder="22:00"
+              value={dossier.routine.sleep_time}
+              onChangeText={(sleep_time) => patchSection('routine', { ...dossier.routine, sleep_time })}
+            />
+          </View>
         </View>
         <MultiChoice
           label="Onde costuma dormir?"
@@ -533,9 +647,79 @@ export default function PetDetailsScreen() {
           ]}
           onChange={(sleeping_places) => patchSection('routine', { ...dossier.routine, sleeping_places })}
         />
-        <BooleanChoice label="Ele costuma ficar sozinho?" value={dossier.routine.stays_alone} onChange={(stays_alone) => patchSection('routine', { ...dossier.routine, stays_alone })} />
-        {dossier.routine.stays_alone ? <FormField label="Por quanto tempo normalmente?" value={dossier.routine.alone_duration} onChangeText={(alone_duration) => patchSection('routine', { ...dossier.routine, alone_duration })} /> : null}
-        <FormField label="Hábitos ou rotinas que o cuidador deve manter" hint="Ex.: dorme depois do almoço, brinca antes de dormir..." multiline value={dossier.routine.habits} onChangeText={(habits) => patchSection('routine', { ...dossier.routine, habits })} />
+        <BooleanChoice
+          label="Ele costuma ficar sozinho?"
+          value={dossier.routine.stays_alone}
+          onChange={(stays_alone) => patchSection('routine', { ...dossier.routine, stays_alone })}
+        />
+        {dossier.routine.stays_alone ? (
+          <FormField
+            label="Por quanto tempo normalmente?"
+            value={dossier.routine.alone_duration}
+            onChangeText={(alone_duration) => patchSection('routine', { ...dossier.routine, alone_duration })}
+          />
+        ) : null}
+        <FormField
+          label="Hábitos ou rotinas que o cuidador deve manter"
+          hint="Ex.: dorme depois do almoço, brinca antes de dormir..."
+          multiline
+          value={dossier.routine.habits}
+          onChangeText={(habits) => patchSection('routine', { ...dossier.routine, habits })}
+        />
+      </SectionCard>
+
+      <SectionCard
+        title="🚽 6.1 Higiene e necessidades"
+        description="Ajuda o cuidador a preservar os hábitos do pet e interpretar acidentes durante a hospedagem.">
+        <SingleChoice
+          label="Como é o hábito de fazer as necessidades no local correto?"
+          value={dossier.hygiene.toilet_training}
+          options={[
+            ['reliable', 'Faz no local correto quase sempre'],
+            ['occasional', 'Tem acidentes ocasionais'],
+            ['frequent', 'Costuma fazer fora do local'],
+            ['training', 'Ainda está aprendendo'],
+            ['unknown', 'Não sei informar'],
+          ]}
+          onChange={(toilet_training) =>
+            patchSection('hygiene', { ...dossier.hygiene, toilet_training })
+          }
+        />
+        <FormField
+          label="Onde costuma fazer xixi?"
+          hint="Ex.: tapete higiênico, caixa de areia, quintal, durante os passeios..."
+          value={dossier.hygiene.urine_place}
+          onChangeText={(urine_place) => patchSection('hygiene', { ...dossier.hygiene, urine_place })}
+        />
+        <FormField
+          label="Onde costuma fazer cocô?"
+          hint="Ex.: quintal, caixa de areia, passeio, tapete..."
+          value={dossier.hygiene.stool_place}
+          onChangeText={(stool_place) => patchSection('hygiene', { ...dossier.hygiene, stool_place })}
+        />
+        <BooleanChoice
+          label="Ele costuma sinalizar quando precisa sair ou usar o local de necessidades?"
+          value={dossier.hygiene.signals_to_go_out}
+          onChange={(signals_to_go_out) =>
+            patchSection('hygiene', { ...dossier.hygiene, signals_to_go_out })
+          }
+        />
+        <FormField
+          label="Frequência habitual"
+          hint="Ex.: xixi 4 a 5 vezes ao dia; cocô 2 vezes ao dia."
+          value={dossier.hygiene.usual_frequency}
+          onChangeText={(usual_frequency) =>
+            patchSection('hygiene', { ...dossier.hygiene, usual_frequency })
+          }
+        />
+        <FormField
+          label="Orientações sobre higiene e necessidades"
+          multiline
+          textAlignVertical="top"
+          hint="Informe sinais, horários, comandos, rotina de limpeza ou qualquer detalhe importante."
+          value={dossier.hygiene.instructions}
+          onChangeText={(instructions) => patchSection('hygiene', { ...dossier.hygiene, instructions })}
+        />
       </SectionCard>
 
       <SectionCard title="🧸 7. Brinquedos e objetos">
@@ -550,57 +734,295 @@ export default function PetDetailsScreen() {
             ['other', 'Outro'],
             ['none', 'Não possui'],
           ]}
-          onChange={(attachment_objects) => patchSection('objects', { ...dossier.objects, attachment_objects })}
+          onChange={(attachment_objects) =>
+            patchSection('objects', { ...dossier.objects, attachment_objects })
+          }
         />
-        <FormField label="Qual?" value={dossier.objects.description} onChangeText={(description) => patchSection('objects', { ...dossier.objects, description })} />
-        <BooleanChoice label="Normalmente vai para hospedagem com esses itens?" value={dossier.objects.bringing_to_hosting} onChange={(bringing_to_hosting) => patchSection('objects', { ...dossier.objects, bringing_to_hosting })} />
+        <FormField
+          label="Qual?"
+          value={dossier.objects.description}
+          onChangeText={(description) => patchSection('objects', { ...dossier.objects, description })}
+        />
+        <BooleanChoice
+          label="Normalmente vai para hospedagem com esses itens?"
+          value={dossier.objects.bringing_to_hosting}
+          onChange={(bringing_to_hosting) =>
+            patchSection('objects', { ...dossier.objects, bringing_to_hosting })
+          }
+        />
       </SectionCard>
 
       <SectionCard title="🩺 8. Saúde">
-        <FormField label="Condições de saúde" placeholder="Se não possui, deixe em branco." multiline value={dossier.health.conditions} onChangeText={(conditions) => patchSection('health', { ...dossier.health, conditions })} />
-        <FormField label="Alergias" multiline value={dossier.health.allergies} onChangeText={(allergies) => patchSection('health', { ...dossier.health, allergies })} />
-        <FormField label="Restrições alimentares" multiline value={dossier.health.dietary_restrictions} onChangeText={(dietary_restrictions) => patchSection('health', { ...dossier.health, dietary_restrictions })} />
-        <FormField label="Cirurgias ou outras condições importantes" multiline value={dossier.health.surgery_or_other} onChangeText={(surgery_or_other) => patchSection('health', { ...dossier.health, surgery_or_other })} />
+        <FormField
+          label="Condições de saúde"
+          placeholder="Se não possui, deixe em branco."
+          multiline
+          value={dossier.health.conditions}
+          onChangeText={(conditions) => patchSection('health', { ...dossier.health, conditions })}
+        />
+        <FormField
+          label="Alergias"
+          multiline
+          value={dossier.health.allergies}
+          onChangeText={(allergies) => patchSection('health', { ...dossier.health, allergies })}
+        />
+        <FormField
+          label="Restrições alimentares"
+          multiline
+          value={dossier.health.dietary_restrictions}
+          onChangeText={(dietary_restrictions) =>
+            patchSection('health', { ...dossier.health, dietary_restrictions })
+          }
+        />
+        <FormField
+          label="Cirurgias ou outras condições importantes"
+          multiline
+          value={dossier.health.surgery_or_other}
+          onChangeText={(surgery_or_other) =>
+            patchSection('health', { ...dossier.health, surgery_or_other })
+          }
+        />
       </SectionCard>
 
-      <SectionCard title="💊 9. Medicamentos" description="Cadastre um ou mais medicamentos. A hospedagem poderá transformar os horários em tarefas obrigatórias.">
+      <SectionCard
+        title="💉 8.1 Vacinação e prevenção"
+        description="Registre a situação preventiva do pet para que o cuidador conheça riscos e cuidados importantes antes de receber o animal.">
+        <SingleChoice
+          label="Como está a vacinação?"
+          value={dossier.preventive_care.vaccination_status}
+          options={[
+            ['up_to_date', 'Vacinas em dia'],
+            ['partial', 'Parcialmente em dia'],
+            ['overdue', 'Há vacinas atrasadas'],
+            ['not_vaccinated', 'Não vacinado'],
+            ['unknown', 'Não sei informar'],
+          ]}
+          onChange={(vaccination_status) =>
+            patchSection('preventive_care', { ...dossier.preventive_care, vaccination_status })
+          }
+        />
+        <FormField
+          label="Vacinas aplicadas / observações"
+          hint="Ex.: V8/V10, antirrábica, gripe, múltipla felina..."
+          multiline
+          value={dossier.preventive_care.vaccines}
+          onChangeText={(vaccines) =>
+            patchSection('preventive_care', { ...dossier.preventive_care, vaccines })
+          }
+        />
+        <View style={styles.twoColumns}>
+          <View style={styles.flexOne}>
+            <FormField
+              label="Última dose"
+              placeholder="DD/MM/AAAA"
+              value={dossier.preventive_care.last_vaccine_date}
+              onChangeText={(last_vaccine_date) =>
+                patchSection('preventive_care', { ...dossier.preventive_care, last_vaccine_date })
+              }
+            />
+          </View>
+          <View style={styles.flexOne}>
+            <FormField
+              label="Próxima dose"
+              placeholder="DD/MM/AAAA"
+              value={dossier.preventive_care.next_vaccine_date}
+              onChangeText={(next_vaccine_date) =>
+                patchSection('preventive_care', { ...dossier.preventive_care, next_vaccine_date })
+              }
+            />
+          </View>
+        </View>
+        <SingleChoice
+          label="Vermífugo"
+          value={dossier.preventive_care.deworming_status}
+          options={[
+            ['up_to_date', 'Em dia'],
+            ['overdue', 'Atrasado'],
+            ['not_used', 'Não utiliza'],
+            ['unknown', 'Não sei informar'],
+          ]}
+          onChange={(deworming_status) =>
+            patchSection('preventive_care', { ...dossier.preventive_care, deworming_status })
+          }
+        />
+        <FormField
+          label="Detalhes do vermífugo"
+          hint="Produto, última aplicação e próxima previsão, se souber."
+          value={dossier.preventive_care.deworming_details}
+          onChangeText={(deworming_details) =>
+            patchSection('preventive_care', { ...dossier.preventive_care, deworming_details })
+          }
+        />
+        <SingleChoice
+          label="Antipulgas / carrapatos"
+          value={dossier.preventive_care.flea_tick_status}
+          options={[
+            ['up_to_date', 'Proteção em dia'],
+            ['overdue', 'Proteção vencida/atrasada'],
+            ['not_used', 'Não utiliza'],
+            ['unknown', 'Não sei informar'],
+          ]}
+          onChange={(flea_tick_status) =>
+            patchSection('preventive_care', { ...dossier.preventive_care, flea_tick_status })
+          }
+        />
+        <FormField
+          label="Detalhes do antipulgas / carrapatos"
+          hint="Produto, data da última aplicação e duração esperada."
+          value={dossier.preventive_care.flea_tick_details}
+          onChangeText={(flea_tick_details) =>
+            patchSection('preventive_care', { ...dossier.preventive_care, flea_tick_details })
+          }
+        />
+        <FormField
+          label="Carteirinha de vacinação / observações adicionais"
+          hint="Anote informações relevantes da carteirinha. O anexo da foto será incluído na etapa de mídia do dossiê."
+          multiline
+          value={dossier.preventive_care.vaccination_card_notes}
+          onChangeText={(vaccination_card_notes) =>
+            patchSection('preventive_care', { ...dossier.preventive_care, vaccination_card_notes })
+          }
+        />
+      </SectionCard>
+
+      <SectionCard
+        title="💊 9. Medicamentos"
+        description="Cadastre um ou mais medicamentos. A hospedagem poderá transformar os horários em tarefas obrigatórias.">
         {dossier.medications.map((medication, index) => (
           <View key={`${index}-${medication.name}`} style={styles.medicationCard}>
             <View style={styles.medicationHeader}>
               <Text style={styles.medicationTitle}>Medicamento {index + 1}</Text>
-              <Pressable accessibilityRole="button" onPress={() => patchSection('medications', dossier.medications.filter((_, itemIndex) => itemIndex !== index))}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() =>
+                  patchSection(
+                    'medications',
+                    dossier.medications.filter((_, itemIndex) => itemIndex !== index),
+                  )
+                }>
                 <Text style={styles.removeText}>Remover</Text>
               </Pressable>
             </View>
-            <FormField label="Nome" value={medication.name} onChangeText={(name) => patchMedication(index, { ...medication, name }, dossier, patchSection)} />
-            <FormField label="Dosagem" value={medication.dosage} onChangeText={(dosage) => patchMedication(index, { ...medication, dosage }, dossier, patchSection)} />
-            <FormField label="Horário(s)" value={medication.schedule} onChangeText={(schedule) => patchMedication(index, { ...medication, schedule }, dossier, patchSection)} />
-            <FormField label="Como administrar" multiline value={medication.administration} onChangeText={(administration) => patchMedication(index, { ...medication, administration }, dossier, patchSection)} />
-            <FormField label="Período do tratamento" value={medication.period} onChangeText={(period) => patchMedication(index, { ...medication, period }, dossier, patchSection)} />
+            <FormField
+              label="Nome"
+              value={medication.name}
+              onChangeText={(name) =>
+                patchMedication(index, { ...medication, name }, dossier, patchSection)
+              }
+            />
+            <FormField
+              label="Dosagem"
+              value={medication.dosage}
+              onChangeText={(dosage) =>
+                patchMedication(index, { ...medication, dosage }, dossier, patchSection)
+              }
+            />
+            <FormField
+              label="Horário(s)"
+              value={medication.schedule}
+              onChangeText={(schedule) =>
+                patchMedication(index, { ...medication, schedule }, dossier, patchSection)
+              }
+            />
+            <FormField
+              label="Como administrar"
+              multiline
+              value={medication.administration}
+              onChangeText={(administration) =>
+                patchMedication(index, { ...medication, administration }, dossier, patchSection)
+              }
+            />
+            <FormField
+              label="Período do tratamento"
+              value={medication.period}
+              onChangeText={(period) =>
+                patchMedication(index, { ...medication, period }, dossier, patchSection)
+              }
+            />
           </View>
         ))}
         <Pressable
           accessibilityRole="button"
-          onPress={() => patchSection('medications', [...dossier.medications, { name: '', dosage: '', schedule: '', administration: '', period: '' }])}
+          onPress={() =>
+            patchSection('medications', [
+              ...dossier.medications,
+              { name: '', dosage: '', schedule: '', administration: '', period: '' },
+            ])
+          }
           style={({ pressed }) => [styles.addMedication, pressed && styles.choicePressed]}>
           <Text style={styles.addMedicationText}>+ Adicionar medicamento</Text>
         </Pressable>
-        <Text style={styles.helper}>A foto da embalagem/orientação veterinária será adicionada quando ligarmos o Storage à câmera/galeria.</Text>
+        <Text style={styles.helper}>
+          A foto da embalagem/orientação veterinária será adicionada quando ligarmos a mídia permanente do dossiê.
+        </Text>
       </SectionCard>
 
       <SectionCard title="🚨 10. Em caso de emergência">
-        <FormField label="Nome do tutor" value={dossier.emergency.tutor_name} onChangeText={(tutor_name) => patchSection('emergency', { ...dossier.emergency, tutor_name })} />
+        <FormField
+          label="Nome do tutor"
+          value={dossier.emergency.tutor_name}
+          onChangeText={(tutor_name) => patchSection('emergency', { ...dossier.emergency, tutor_name })}
+        />
         <View style={styles.twoColumns}>
-          <View style={styles.flexOne}><FormField label="Telefone" keyboardType="phone-pad" value={dossier.emergency.tutor_phone} onChangeText={(tutor_phone) => patchSection('emergency', { ...dossier.emergency, tutor_phone })} /></View>
-          <View style={styles.flexOne}><FormField label="WhatsApp" keyboardType="phone-pad" value={dossier.emergency.tutor_whatsapp} onChangeText={(tutor_whatsapp) => patchSection('emergency', { ...dossier.emergency, tutor_whatsapp })} /></View>
+          <View style={styles.flexOne}>
+            <FormField
+              label="Telefone"
+              keyboardType="phone-pad"
+              value={dossier.emergency.tutor_phone}
+              onChangeText={(tutor_phone) =>
+                patchSection('emergency', { ...dossier.emergency, tutor_phone })
+              }
+            />
+          </View>
+          <View style={styles.flexOne}>
+            <FormField
+              label="WhatsApp"
+              keyboardType="phone-pad"
+              value={dossier.emergency.tutor_whatsapp}
+              onChangeText={(tutor_whatsapp) =>
+                patchSection('emergency', { ...dossier.emergency, tutor_whatsapp })
+              }
+            />
+          </View>
         </View>
-        <FormField label="Contato de emergência" value={dossier.emergency.contact_name} onChangeText={(contact_name) => patchSection('emergency', { ...dossier.emergency, contact_name })} />
-        <FormField label="Telefone do contato" keyboardType="phone-pad" value={dossier.emergency.contact_phone} onChangeText={(contact_phone) => patchSection('emergency', { ...dossier.emergency, contact_phone })} />
+        <FormField
+          label="Contato de emergência"
+          value={dossier.emergency.contact_name}
+          onChangeText={(contact_name) =>
+            patchSection('emergency', { ...dossier.emergency, contact_name })
+          }
+        />
+        <FormField
+          label="Telefone do contato"
+          keyboardType="phone-pad"
+          value={dossier.emergency.contact_phone}
+          onChangeText={(contact_phone) =>
+            patchSection('emergency', { ...dossier.emergency, contact_phone })
+          }
+        />
         <Text style={styles.subheading}>Veterinário de confiança</Text>
-        <FormField label="Nome" value={dossier.emergency.vet_name} onChangeText={(vet_name) => patchSection('emergency', { ...dossier.emergency, vet_name })} />
-        <FormField label="Clínica" value={dossier.emergency.clinic} onChangeText={(clinic) => patchSection('emergency', { ...dossier.emergency, clinic })} />
-        <FormField label="Telefone" keyboardType="phone-pad" value={dossier.emergency.vet_phone} onChangeText={(vet_phone) => patchSection('emergency', { ...dossier.emergency, vet_phone })} />
-        <FormField label="Endereço" multiline value={dossier.emergency.vet_address} onChangeText={(vet_address) => patchSection('emergency', { ...dossier.emergency, vet_address })} />
+        <FormField
+          label="Nome"
+          value={dossier.emergency.vet_name}
+          onChangeText={(vet_name) => patchSection('emergency', { ...dossier.emergency, vet_name })}
+        />
+        <FormField
+          label="Clínica"
+          value={dossier.emergency.clinic}
+          onChangeText={(clinic) => patchSection('emergency', { ...dossier.emergency, clinic })}
+        />
+        <FormField
+          label="Telefone"
+          keyboardType="phone-pad"
+          value={dossier.emergency.vet_phone}
+          onChangeText={(vet_phone) => patchSection('emergency', { ...dossier.emergency, vet_phone })}
+        />
+        <FormField
+          label="Endereço"
+          multiline
+          value={dossier.emergency.vet_address}
+          onChangeText={(vet_address) => patchSection('emergency', { ...dossier.emergency, vet_address })}
+        />
         <SingleChoice
           label="Em uma emergência, o cuidador poderá levar o pet para atendimento?"
           value={dossier.emergency.authorization}
@@ -609,13 +1031,15 @@ export default function PetDetailsScreen() {
             ['try_contact', 'Sim, mas tente falar comigo antes'],
             ['only_authorized', 'Somente com minha autorização'],
           ]}
-          onChange={(authorization) => patchSection('emergency', { ...dossier.emergency, authorization })}
+          onChange={(authorization) =>
+            patchSection('emergency', { ...dossier.emergency, authorization })
+          }
         />
       </SectionCard>
 
       <SectionCard
-        title="🎒 Itens enviados e 📸 registro de entrega"
-        description="Essas informações NÃO ficam neste dossiê. Elas serão preenchidas ao criar cada hospedagem, porque representam o que foi entregue e o estado do pet naquele evento específico." />
+        title="🎒 11. Itens enviados e 📸 12. Registro de entrega"
+        description="Essas informações NÃO ficam neste dossiê. Elas são preenchidas ao criar cada hospedagem, porque representam o que foi entregue e o estado do pet naquele evento específico." />
 
       <SectionCard title="13. O que mais o cuidador precisa saber?">
         <FormField
@@ -671,7 +1095,15 @@ function ReadOnlyRow({ label, value, last = false }: { label: string; value: str
   );
 }
 
-function BooleanChoice({ label, value, onChange }: { label: string; value: NullableBoolean; onChange: (value: boolean) => void }) {
+function BooleanChoice({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: NullableBoolean;
+  onChange: (value: boolean) => void;
+}) {
   return (
     <View style={styles.booleanRow}>
       <Text style={styles.booleanLabel}>{label}</Text>
@@ -688,7 +1120,17 @@ function BooleanChoice({ label, value, onChange }: { label: string; value: Nulla
   );
 }
 
-function SingleChoice({ label, value, options, onChange }: { label: string; value: string; options: readonly (readonly [string, string])[]; onChange: (value: string) => void }) {
+function SingleChoice({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: readonly (readonly [string, string])[];
+  onChange: (value: string) => void;
+}) {
   return (
     <View style={styles.choiceGroup}>
       <Text style={styles.choiceLabel}>{label}</Text>
@@ -701,7 +1143,11 @@ function SingleChoice({ label, value, options, onChange }: { label: string; valu
               accessibilityRole="button"
               accessibilityState={{ selected }}
               onPress={() => onChange(key)}
-              style={({ pressed }) => [styles.choice, selected && styles.choiceSelected, pressed && styles.choicePressed]}>
+              style={({ pressed }) => [
+                styles.choice,
+                selected && styles.choiceSelected,
+                pressed && styles.choicePressed,
+              ]}>
               <Text style={[styles.choiceText, selected && styles.choiceTextSelected]}>{optionLabel}</Text>
             </Pressable>
           );
@@ -711,7 +1157,17 @@ function SingleChoice({ label, value, options, onChange }: { label: string; valu
   );
 }
 
-function MultiChoice({ label, values, options, onChange }: { label: string; values: string[]; options: readonly (readonly [string, string])[]; onChange: (values: string[]) => void }) {
+function MultiChoice({
+  label,
+  values,
+  options,
+  onChange,
+}: {
+  label: string;
+  values: string[];
+  options: readonly (readonly [string, string])[];
+  onChange: (values: string[]) => void;
+}) {
   return (
     <View style={styles.choiceGroup}>
       <Text style={styles.choiceLabel}>{label}</Text>
@@ -723,8 +1179,14 @@ function MultiChoice({ label, values, options, onChange }: { label: string; valu
               key={key}
               accessibilityRole="button"
               accessibilityState={{ selected }}
-              onPress={() => onChange(selected ? values.filter((item) => item !== key) : [...values, key])}
-              style={({ pressed }) => [styles.choice, selected && styles.choiceSelected, pressed && styles.choicePressed]}>
+              onPress={() =>
+                onChange(selected ? values.filter((item) => item !== key) : [...values, key])
+              }
+              style={({ pressed }) => [
+                styles.choice,
+                selected && styles.choiceSelected,
+                pressed && styles.choicePressed,
+              ]}>
               <Text style={[styles.choiceText, selected && styles.choiceTextSelected]}>{optionLabel}</Text>
             </Pressable>
           );
