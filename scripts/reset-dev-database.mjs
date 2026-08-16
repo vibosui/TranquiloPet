@@ -6,16 +6,21 @@ import { createClient } from '@supabase/supabase-js';
 const EXPECTED_PROJECT_REF = 'inenqyqkfpczotnlimkf';
 const RESET_CONFIRMATION = 'LIMPAR HOSPEDA PATAS';
 const ENV_FILE = '.env.reset.local';
-const BUCKETS = ['avatars', 'pet-media', 'event-media', 'event-evidence'];
+const BUCKETS = ['avatars', 'pet-media', 'event-media', 'event-evidence', 'event-updates'];
 const TABLES_TO_VERIFY = [
   'profiles',
   'tutor_profiles',
   'caregiver_profiles',
+  'caregiver_service_profiles',
+  'caregiver_plan_options',
+  'caregiver_availability_windows',
   'pets',
   'pet_photos',
   'connections',
   'hosting_events',
   'hosting_event_pets',
+  'event_plan_periods',
+  'event_plan_media',
   'event_tasks',
   'task_evidence',
   'chat_messages',
@@ -65,7 +70,7 @@ async function confirmReset() {
     console.log('\n⚠️  RESET DE DESENVOLVIMENTO — HOSPEDA PATAS');
     console.log(`Projeto permitido: ${EXPECTED_PROJECT_REF}`);
     console.log('Serão removidos usuários, perfis, pets, contatos, hospedagens, chats, checklist, notificações e arquivos dos buckets do MVP.');
-    console.log('Schema, migrations, funções, RLS e buckets serão preservados.\n');
+    console.log('Schema, migrations, catálogos, funções, RLS e buckets serão preservados.\n');
     const answer = await rl.question(`Digite exatamente "${RESET_CONFIRMATION}" para continuar: `);
     if (answer.trim() !== RESET_CONFIRMATION) {
       throw new Error('Reset cancelado: confirmação não confere.');
@@ -114,7 +119,7 @@ async function verifyReset(supabase) {
     if ((count ?? 0) !== 0) throw new Error(`A tabela ${table} ainda contém ${count} registro(s).`);
   }
 
-  console.log('✓ Verificação concluída: dados funcionais zerados.');
+  console.log('✓ Verificação concluída: dados funcionais zerados. Catálogos de planos/mensagens permanecem disponíveis.');
 }
 
 async function main() {
