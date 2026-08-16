@@ -9,7 +9,10 @@
     "userInterfaceStyle": "light",
     "ios": {
       "icon": "./assets/expo.icon",
-      "bundleIdentifier": "com.vibosui.hospedapatas"
+      "bundleIdentifier": "com.vibosui.hospedapatas",
+      "buildNumber": "1",
+      "supportsTablet": false,
+      "backgroundColor": "#FFFFFF"
     },
     "android": {
       "package": "com.vibosui.hospedapatas",
